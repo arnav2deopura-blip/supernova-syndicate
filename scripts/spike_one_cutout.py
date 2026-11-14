@@ -1,4 +1,4 @@
-"""First-hour spike (issue #2): coordinates -> one SPHEREx cutout PNG.
+"""First-hour spike (issue #3): coordinates -> one SPHEREx cutout PNG.
 
 Goal: prove we can reach IRSA and see a real cutout before building anything else.
 

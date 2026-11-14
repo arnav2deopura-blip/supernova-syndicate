@@ -7,10 +7,10 @@ from __future__ import annotations
 
 
 def spectrum_at(ra: float, dec: float) -> list[dict]:
-    """Issue #14: per-exposure aperture flux with wavelength at the source pixel."""
-    raise NotImplementedError("Issue #14: click-for-spectrum")
+    """Issue #15: per-exposure aperture flux with wavelength at the source pixel."""
+    raise NotImplementedError("Issue #15: click-for-spectrum")
 
 
 def light_curve(ra: float, dec: float, band: str) -> list[dict]:
-    """Issue #15: flux vs time within one detector band."""
-    raise NotImplementedError("Issue #15: light curves")
+    """Issue #16: flux vs time within one detector band."""
+    raise NotImplementedError("Issue #16: light curves")

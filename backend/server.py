@@ -74,12 +74,12 @@ def resolve(name: str = Query(..., min_length=1)):
 
 @app.get("/api/frames", response_model=FramesResponse)
 def frames(ra: float = RA, dec: float = DEC, fov: float = FOV, band: Band = "D2"):
-    raise NotImplementedError("Issue #7: /api/frames end to end")
+    raise NotImplementedError("Issue #8: /api/frames end to end")
 
 
 @app.get("/api/exposures", response_model=ExposuresResponse)
 def exposures(ra: float = RA, dec: float = DEC, fov: float = FOV):
-    raise NotImplementedError("Issue #3: exposure listing")
+    raise NotImplementedError("Issue #4: exposure listing")
 
 
 @app.get("/api/spectrum", response_model=SpectrumResponse)

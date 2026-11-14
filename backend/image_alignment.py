@@ -21,5 +21,5 @@ def target_wcs(ra: float, dec: float, fov_deg: float, pixel_scale_arcsec: float)
 
 
 def reproject_to(image, image_wcs: WCS, out_wcs: WCS):
-    """Issue #6: reproject one cutout onto out_wcs (use reproject.reproject_interp)."""
-    raise NotImplementedError("Issue #6: reprojection to common grid")
+    """Issue #7: reproject one cutout onto out_wcs (use reproject.reproject_interp)."""
+    raise NotImplementedError("Issue #7: reprojection to common grid")

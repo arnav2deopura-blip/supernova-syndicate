@@ -1,4 +1,4 @@
-"""Bake the five test targets into frontend/precomputed/<slug>/ (issue #16).
+"""Bake the five test targets into frontend/precomputed/<slug>/ (issue #17).
 
 Each folder gets frames.json, overlay.json, spectrum.json, exposures.json in the
 exact shapes of docs/API.md, so the frontend can run with the backend down.
@@ -19,7 +19,7 @@ from backend import server  # noqa: E402  (reuse the same route functions as the
 OUT = ROOT / "frontend" / "precomputed"
 
 # Must match PRESETS in frontend/js/app.js. Positions should come from catalogs.resolve_name
-# once issue #11 lands; these are approximate placeholders. [verify on SIMBAD]
+# once issue #12 lands; these are approximate placeholders. [verify on SIMBAD]
 TARGETS = {
     "barnards-star": {"name": "Barnard's Star", "band": "D2", "fov": 0.1},
     "eps-indi-b": {"name": "eps Indi B", "band": "D3", "fov": 0.1},

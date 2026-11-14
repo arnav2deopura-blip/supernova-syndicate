@@ -1,7 +1,7 @@
 // All network calls live here. Owner: C.
 // Order of fallbacks: live backend -> precomputed/<preset>/ -> mock/ (with a banner).
 
-// TODO (issue #10): set to the deployed backend URL.
+// TODO (issue #11): set to the deployed backend URL.
 export const API_BASE = "http://localhost:8000";
 
 const params = new URLSearchParams(location.search);
