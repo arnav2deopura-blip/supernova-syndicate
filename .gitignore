@@ -1,0 +1,35 @@
+# Local data cache (never commit archive downloads)
+data/*
+!data/.gitkeep
+
+# FITS files, except tiny test fixtures
+*.fits
+*.fits.gz
+*.fz
+!tests/fixtures/*.fits
+!tests/fixtures/*.fits.gz
+
+# Secrets
+.env
+*.pem
+*credentials*.json
+service-account*.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+*.egg-info/
+
+# Astropy cache
+.astropy/
+astropy_cache/
+
+# JS / OS / editors
+node_modules/
+.DS_Store
+.vscode/
+.idea/
