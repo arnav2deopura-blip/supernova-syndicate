@@ -1,0 +1,39 @@
+# All tunables live here. New SPHEREx release = edit this file only.
+# Owner: A. Values marked [verify] come from the plan, not from IRSA docs.
+
+archive:
+  sia_url: https://irsa.ipac.caltech.edu/SIA
+  tap_url: https://irsa.ipac.caltech.edu/TAP
+  # DR1 = reprocessed QR2; use with QR3 as one set. QR2 is no longer searchable.
+  collections:
+    - spherex_dr1
+    - spherex_qr3
+    - spherex_dr1_deep
+    - spherex_qr3_deep
+
+# Approximate detector wavelength ranges in microns [verify in Explanatory Supplement]
+bands:
+  D1: [0.75, 1.10]
+  D2: [1.10, 1.60]
+  D3: [1.60, 2.40]
+  D4: [2.40, 3.80]
+  D5: [3.80, 4.40]
+  D6: [4.40, 5.00]
+
+pixel_scale_arcsec: 6.15
+oversample: 2              # output grid = pixel_scale / oversample
+
+epochs:
+  gap_days: 60             # split exposures into a new epoch when the time gap exceeds this
+
+fov:
+  default_deg: 0.1
+  max_deg: 0.5
+
+download:
+  max_workers: 8
+  timeout_s: 60
+  retries: 3
+
+cache:
+  dir: ./data/cache        # overridden by SPHEREX_CACHE_DIR

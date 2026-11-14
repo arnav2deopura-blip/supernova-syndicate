@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SPHEREx Sky Explorer</title>
+  <meta name="description" content="Blink SPHEREx infrared sky passes to find stars that move or change.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <h1>SPHEREx Sky Explorer</h1>
+    <p class="tagline">A blink comparator for a 102-colour sky</p>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <main>
+    <section class="controls" aria-label="Target">
+      <form id="target-form">
+        <label>Name <input id="name" placeholder="Barnard's Star" autocomplete="off"></label>
+        <label>RA <input id="ra" placeholder="269.4486 or 17:57:48" required></label>
+        <label>Dec <input id="dec" placeholder="4.7394 or +04:44:22" required></label>
+        <label>FOV
+          <select id="fov">
+            <option value="0.04">0.04°</option>
+            <option value="0.1" selected>0.1°</option>
+            <option value="0.25">0.25°</option>
+          </select>
+        </label>
+        <label>Band
+          <select id="band">
+            <option>D1</option><option selected>D2</option><option>D3</option>
+            <option>D4</option><option>D5</option><option>D6</option>
+          </select>
+        </label>
+        <button type="submit">Load</button>
+      </form>
+      <div class="presets" id="presets" aria-label="Test targets"></div>
+    </section>
+
+    <section class="viewer" aria-label="Viewer">
+      <div class="stage">
+        <canvas id="image" width="48" height="48"></canvas>
+        <canvas id="overlay"></canvas>
+      </div>
+      <div class="player">
+        <button id="play" type="button">Pause</button>
+        <label>Speed <input id="speed" type="range" min="1" max="10" value="3"></label>
+        <span id="frame-label">–</span>
+      </div>
+      <div class="display">
+        <label>Mode
+          <select id="mode">
+            <option value="blink">Blink</option>
+            <option value="diff">Difference (last − first)</option>
+            <option value="sum">Sum</option>
+          </select>
+        </label>
+        <label>Stretch
+          <select id="stretch">
+            <option value="asinh">asinh</option>
+            <option value="linear">linear</option>
+          </select>
+        </label>
+        <label>Colormap
+          <select id="cmap">
+            <option value="gray">gray</option>
+            <option value="inferno">inferno</option>
+            <option value="viridis">viridis</option>
+          </select>
+        </label>
+        <label>Clip % <input id="clip" type="range" min="90" max="100" step="0.1" value="99.5"></label>
+        <label><input id="show-overlay" type="checkbox" checked> Gaia overlay</label>
+      </div>
+    </section>
+
+    <aside class="side">
+      <h2>Frames</h2>
+      <table id="meta"><thead><tr><th>Epoch</th><th>MJD</th><th>Exposures</th><th>Flagged</th></tr></thead><tbody></tbody></table>
+      <h2>Spectrum <small>(click the image)</small></h2>
+      <canvas id="spectrum" width="360" height="200"></canvas>
+    </aside>
+  </main>
+
+  <footer>
+    Data: SPHEREx (NASA/IPAC IRSA), Gaia DR3 (ESA). Built for NASA Space Apps 2026 by Supernova Syndicate.
+  </footer>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

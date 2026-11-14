@@ -1,0 +1,98 @@
+:root {
+  --bg: #0b0f17;
+  --panel: #131a26;
+  --text: #e6eaf2;
+  --muted: #8b95a7;
+  --accent: #6cb4ff;
+  --warn: #ffb547;
+  --radius: 8px;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+header, footer { padding: 16px; }
+header h1 { margin: 0; font-size: 1.4rem; }
+.tagline { margin: 2px 0 0; color: var(--muted); }
+footer { color: var(--muted); font-size: 0.85rem; }
+
+.banner {
+  margin: 0 16px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: #3a2a0e;
+  color: var(--warn);
+}
+
+main {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 960px) {
+  main { grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); }
+  .controls { grid-column: 1 / -1; }
+}
+
+section, aside {
+  background: var(--panel);
+  border-radius: var(--radius);
+  padding: 12px;
+  min-width: 0;
+}
+
+form, .player, .display, .presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: end;
+}
+.presets { margin-top: 10px; }
+
+label { display: flex; flex-direction: column; font-size: 0.8rem; color: var(--muted); gap: 2px; }
+input, select, button {
+  font: inherit;
+  color: var(--text);
+  background: #1c2536;
+  border: 1px solid #2a3550;
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+input[type="checkbox"] { width: auto; }
+label:has(input[type="checkbox"]) { flex-direction: row; align-items: center; gap: 6px; }
+button { cursor: pointer; }
+button:hover { border-color: var(--accent); }
+.presets button { font-size: 0.85rem; }
+
+.stage {
+  position: relative;
+  width: min(100%, 560px);
+  aspect-ratio: 1;
+  margin: 0 auto 12px;
+  background: #000;
+}
+.stage canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+#image { image-rendering: pixelated; cursor: crosshair; }
+#overlay { pointer-events: none; }
+
+.player { justify-content: center; margin-bottom: 10px; }
+#frame-label { font-variant-numeric: tabular-nums; min-width: 9ch; }
+
+.side h2 { font-size: 1rem; margin: 4px 0 8px; }
+.side h2 small { color: var(--muted); font-weight: normal; }
+table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-bottom: 16px; }
+th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid #222c3f; }
+#spectrum { width: 100%; height: auto; background: #0d131d; border-radius: 6px; }
