@@ -30,13 +30,14 @@ def test_cutout_url():
 
 
 def test_health():
-    assert client.get("/api/health").json() == {"ok": True}
+    body = client.get("/api/health").json()
+    assert body["ok"] is True and body["release"]
 
 
 def test_errors_share_one_shape():
     for url, code in [
         ("/api/frames?ra=999&dec=0", "bad_request"),
-        ("/api/frames?ra=10&dec=0", "not_implemented"),
+        ("/api/spectrum?ra=10&dec=0", "not_implemented"),
         ("/api/overlay?ra=10&dec=0&cat=nope", "bad_request"),
     ]:
         r = client.get(url)
@@ -62,3 +63,16 @@ def test_mock_frames_sizes_consistent():
     f = schemas.FramesResponse(**json.loads((MOCK / "frames.json").read_text()))
     for fr in f.frames:
         assert len(fr.data) == fr.width * fr.height
+
+
+def test_cache_prune_removes_oldest_first(tmp_path):
+    import os
+    import time as _t
+
+    for i in range(10):
+        p = tmp_path / f"f{i}.bin"
+        p.write_bytes(b"x" * 200_000)
+        os.utime(p, (_t.time() - 100 + i, _t.time() - 100 + i))
+    removed = cache.prune(max_mb=1.0, root=tmp_path, keep_fraction=0.5)  # 2 MB -> under 0.5 MB
+    left = sorted(p.name for p in tmp_path.iterdir())
+    assert removed == 8 and left == ["f8.bin", "f9.bin"]

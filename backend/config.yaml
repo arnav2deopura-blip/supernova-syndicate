@@ -1,5 +1,5 @@
 # All tunables live here. New SPHEREx release = edit this file only.
-# Owner: A. Values marked [verify] come from the plan, not from IRSA docs.
+# Values checked against real DR1/QR3 files on 14 Nov 2026 (see docs/SPHEREX_DATA_NOTES.md).
 
 archive:
   sia_url: https://irsa.ipac.caltech.edu/SIA
@@ -10,30 +10,63 @@ archive:
     - spherex_qr3
     - spherex_dr1_deep
     - spherex_qr3_deep
+  # Public S3 mirror (no credentials). Used when IRSA's services are down, and for byte-range stamps.
+  s3_http: https://nasa-irsa-spherex.s3.amazonaws.com/
+  s3_releases:            # newest last; level-2 files live under <release>/level2/<week>/<proc>/<det>/
+    - dr1                 # 2025W17 .. 2026W20
+    - qr3                 # 2026W20 .. 2026W40 (as of 14 Nov 2026)
+  spectral_channels: dr1/spectral_channels/cal-sch-v2-2026-229/spectral_channels_spx_cal-sch-v2-2026-229.fits
+  prefer: tap              # tap = IRSA TAP first, S3 header scan as fallback; s3 = skip TAP
+  tap_timeout_s: 20
+  tap_cooldown_s: 600       # after a TAP failure, go straight to S3 for this long
+  coarse_radius_deg: 12    # index: observations whose D1 centre is this close get header-scanned on D1-D3
+  fine_radius_deg: 11      # fine scan: D1 centre within this of the target (D3's far corner is ~10.3 deg)
+  max_candidate_obs: 1500  # scan budget: beyond this many candidate observations (near the ecliptic poles),
+  scan_window_days: 10     #   keep an equal share per 10-day window. Barnard has ~980, so it stays complete.
 
-# Approximate detector wavelength ranges in microns [verify in Explanatory Supplement]
+release_tag: dr1+qr3-2026W40   # bump when a release is added; invalidates cached products
+
+# Detector wavelength coverage in microns: min WL_MIN / max WL_MAX of the 17 channels per
+# detector in the spectral_channels file above. Edges overlap slightly between detectors.
 bands:
-  D1: [0.75, 1.10]
-  D2: [1.10, 1.60]
-  D3: [1.60, 2.40]
-  D4: [2.40, 3.80]
-  D5: [3.80, 4.40]
-  D6: [4.40, 5.00]
+  D1: [0.743, 1.116]
+  D2: [1.099, 1.651]
+  D3: [1.636, 2.440]
+  D4: [2.422, 3.827]
+  D5: [3.814, 4.426]
+  D6: [4.418, 5.009]
+channels_per_detector: 17
+# Detectors 1-3 (SWIR) and 4-6 (MWIR) see the same sky through a dichroic: D1/D4, D2/D5, D3/D6.
+sky_pairs: [[1, 4], [2, 5], [3, 6]]
 
-pixel_scale_arcsec: 6.15
-oversample: 2              # output grid = pixel_scale / oversample
+image_unit: MJy/sr              # BUNIT of the IMAGE HDU. Spectra are converted to uJy.
+pixel_scale_arcsec: 6.15        # nominal; header OMEGA_MEDIAN ~37.69 arcsec^2 -> 6.14" square
+oversample: 2                   # output grid = pixel_scale / oversample (~3.075"/px)
+psf_fwhm_arcsec: 7.5            # header PSF_FWHM median on a D2 frame was 7.46"
+
+# FLAGS bit names come from the FLAGS header (MSKNnnnn/MSKMnnnn), so bit numbers are never hard-coded.
+# Groups are by name. A bright star like Barnard's sets OVERFLOW/TRANSIENT/SUR_ERROR/BLOOM on its core,
+# so masking those for display would punch a hole exactly where the target is.
+flags:
+  display_mask: [NONFUNC, MISSING_DATA, HOT, COLD, DICHROIC]        # NaN in images we show
+  photometry_reject: [TRANSIENT, OVERFLOW, SUR_ERROR, NONLINEAR, PERSIST, OUTLIER, STREAK, SNOWBALL]  # point marked flagged
+  contamination: [GHOST, GHOST_FPA, GHOST_EXT, CROSSTALK, HALO, BLOOM]  # reported, not masked
+  ignore: [SOURCE, FULLSAMPLE, PHANMISS]                               # SOURCE marks every star; never mask it
 
 epochs:
   gap_days: 60             # split exposures into a new epoch when the time gap exceeds this
+  max_span_days: 90        # longer passes are split (largest gap first); polar targets get a time series
 
 fov:
   default_deg: 0.1
   max_deg: 0.5
 
 download:
-  max_workers: 8
+  max_workers: 16          # parallel stamp downloads (latency-bound: ~2 s and ~2 MB per stamp)
+  header_workers: 48       # parallel header range reads during an S3 scan (latency-bound)
   timeout_s: 60
-  retries: 3
+  retries: 3               # S3 drops the odd connection under parallel load; always retry
 
 cache:
   dir: ./data/cache        # overridden by SPHEREX_CACHE_DIR
+  max_mb: 0                # 0 = unlimited; set SPHEREX_CACHE_MAX_MB on Cloud Run (/tmp uses instance memory)
