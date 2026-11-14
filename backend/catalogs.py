@@ -30,10 +30,10 @@ def mjd_to_year(mjd: float) -> float:
 
 
 def resolve_name(name: str) -> dict:
-    """Issue #11: Sesame/SIMBAD lookup returning ra, dec, pmra, pmdec, ref epoch."""
-    raise NotImplementedError("Issue #11: name resolve + proper-motion propagation")
+    """Issue #12: Sesame/SIMBAD lookup returning ra, dec, pmra, pmdec, ref epoch."""
+    raise NotImplementedError("Issue #12: name resolve + proper-motion propagation")
 
 
 def gaia_sources(ra: float, dec: float, fov: float) -> list[dict]:
-    """Issue #13: Gaia DR3 cone search."""
-    raise NotImplementedError("Issue #13: Gaia overlay")
+    """Issue #14: Gaia DR3 cone search."""
+    raise NotImplementedError("Issue #14: Gaia overlay")

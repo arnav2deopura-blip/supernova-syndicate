@@ -16,6 +16,6 @@ def test_target_wcs_is_north_up_and_centred():
     assert dec_up > dec
 
 
-@pytest.mark.skip(reason="Issue #6: needs a fixture FITS cutout in tests/fixtures/")
+@pytest.mark.skip(reason="Issue #7: needs a fixture FITS cutout in tests/fixtures/")
 def test_reproject_shifts_known_star():
     pass

@@ -35,7 +35,7 @@ def epoch_label(index: int) -> str:
 
 
 def mask_and_subtract(image: np.ndarray, flags: np.ndarray, zodi: np.ndarray | None, bad_bits: int) -> np.ndarray:
-    """Issue #5: NaN-out flagged pixels and subtract the ZODI HDU (or a local median)."""
+    """Issue #6: NaN-out flagged pixels and subtract the ZODI HDU (or a local median)."""
     out = image.astype(np.float32).copy()
     out[(flags & bad_bits) != 0] = np.nan
     if zodi is not None:
