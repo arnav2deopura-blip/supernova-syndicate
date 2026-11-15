@@ -138,6 +138,13 @@ def wavelength_at(hdul: fits.HDUList, x: float, y: float) -> tuple[float, float]
 
 # ---------------------------------------------------------------- one stamp -> clean image
 
+ARCSEC2_TO_SR = (np.pi / 180 / 3600) ** 2
+# Pixels a PSF fit must not trust on a bright star: the core is clipped. On real stamps SUR_ERROR and
+# TRANSIENT cover the *whole* PSF of a bright star (Barnard: a 5x5 block around a 4-pixel OVERFLOW core) while
+# the values there look smooth, so those are only down-weighted ("suspect"), never masked.
+SATURATION_FLAGS = ("OVERFLOW", "NONLINEAR")
+SUSPECT_FLAGS = ("SUR_ERROR", "TRANSIENT")
+
 @dataclass
 class PreparedStamp:
     image: np.ndarray            # MJy/sr, zodi + local background removed, display-masked (NaN)
@@ -153,6 +160,18 @@ class PreparedStamp:
     target_flags: list[str] = field(default_factory=list)
     masked_fraction: float = 0.0
     bkg_rms: float = float("nan")  # robust background noise, MJy/sr
+    # For photometry / astrometry (items 4-5). Optional so hand-built stamps in tests stay valid.
+    x0: int = 0                  # detector pixel of stamp pixel (0, 0): CUTX0 / CUTY0
+    y0: int = 0
+    reject: Optional[np.ndarray] = None    # bool: photometry_reject flag set (saturation, cosmic ray, ...)
+    saturated: Optional[np.ndarray] = None  # bool: OVERFLOW / NONLINEAR -> masked (wing fit)
+    suspect: Optional[np.ndarray] = None    # bool: SUR_ERROR / TRANSIENT -> down-weighted in fits
+    contam: Optional[np.ndarray] = None    # bool: contamination flags (ghost, halo, bloom, crosstalk)
+    epsf: Optional[np.ndarray] = None      # nearest-zone ePSF, 33x33, oversampled epsf_oversample x
+    epsf_oversample: int = 5
+    epsf_cwave: float = float("nan")
+    omega_sr: float = float("nan")         # native pixel solid angle (OMEGA_MEDIAN), steradian
+    sc_pos_km: Optional[tuple[float, float, float]] = None  # X_SC/Y_SC/Z_SC, geocentric km
 
 
 def prepare_stamp(hdul: fits.HDUList, ra: float, dec: float, flag_policy: dict) -> Optional[PreparedStamp]:
@@ -183,11 +202,25 @@ def prepare_stamp(hdul: fits.HDUList, ra: float, dec: float, flag_policy: dict) 
 
     lam, bw = wavelength_at(hdul, x, y)
     report = set(flag_policy["photometry_reject"]) | set(flag_policy["contamination"]) | set(flag_policy["display_mask"])
+    epsf, os_, cwave = None, 5, float("nan")
+    if "EPSF" in hdul:
+        e = hdul["EPSF"]
+        epsf = np.asarray(e.data["EPSF"][0], float)
+        os_ = int(e.header.get("OVSMPX", 5))
+        cwave = float(e.data["CWAVE"][0]) if "CWAVE" in e.data.columns.names else float("nan")
+    sc = tuple(float(hdr[k]) for k in ("X_SC", "Y_SC", "Z_SC")) if all(k in hdr for k in ("X_SC", "Y_SC", "Z_SC")) else None
     return PreparedStamp(
         image=image, variance=variance, wcs=wcs, mjd=float(hdr["MJD-AVG"]), detector=int(hdr["DETECTOR"]),
         obs_id=str(hdr.get("OBSID", "")), x=x, y=y, lam_um=lam, bw_um=bw,
         target_flags=[n for n in flags_near(flags, bits, x, y) if n in report],
         masked_fraction=float(np.mean(~np.isfinite(image))), bkg_rms=float(std),
+        x0=int(hdr.get("CUTX0", 0)), y0=int(hdr.get("CUTY0", 0)),
+        reject=(flags & mask_for(bits, flag_policy["photometry_reject"])) != 0,
+        saturated=(flags & mask_for(bits, SATURATION_FLAGS)) != 0,
+        suspect=(flags & mask_for(bits, SUSPECT_FLAGS)) != 0,
+        contam=(flags & mask_for(bits, flag_policy["contamination"])) != 0,
+        epsf=epsf, epsf_oversample=os_, epsf_cwave=cwave,
+        omega_sr=float(hdr.get("OMEGA_MEDIAN", np.nan)) * ARCSEC2_TO_SR, sc_pos_km=sc,
     )
 
 

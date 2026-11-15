@@ -17,6 +17,7 @@ STAGE_TEXT = {
     "headers": "Reading exposure headers",
     "stamps": "Downloading image cutouts",
     "coadd": "Aligning and stacking each survey pass",
+    "cube": "Stacking each spectral channel",
 }
 
 

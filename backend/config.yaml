@@ -23,6 +23,16 @@ archive:
   fine_radius_deg: 11      # fine scan: D1 centre within this of the target (D3's far corner is ~10.3 deg)
   max_candidate_obs: 1500  # scan budget: beyond this many candidate observations (near the ecliptic poles),
   scan_window_days: 10     #   keep an equal share per 10-day window. Barnard has ~980, so it stays complete.
+  scan_per_det_window: 8   # v2 index (with orientation): at most this many observations per detector per window
+  # Detector outlines in detector-1 pixel coordinates (0-based x0, x1, y0, y1) under a pure TAN projection
+  # with D1's CRVAL + PC (no SIP). Medians over 1500 real D1/D2/D3 header triples (14 Nov 2026); the
+  # margins cover SIP (<=125 px at the far corners) and the ~115 px y-steps between an observation's exposures.
+  focal_plane:
+    D1: [-9, 2042, 0, 2049]
+    D2: [2254, 4321, 14, 2115]
+    D3: [4519, 6641, 79, 2260]
+    x_margin_px: 60
+    y_margin_px: 500
 
 release_tag: dr1+qr3-2026W40   # bump when a release is added; invalidates cached products
 
@@ -70,3 +80,8 @@ download:
 cache:
   dir: ./data/cache        # overridden by SPHEREX_CACHE_DIR
   max_mb: 0                # 0 = unlimited; set SPHEREX_CACHE_MAX_MB on Cloud Run (/tmp uses instance memory)
+
+lightcurve:                # item 4 (backend/lightcurve.py)
+  floor: 0.02              # systematic error per point, fraction; raised to the comparison-star rms when larger
+  bin_days: 15             # light-curve bins (finer than the 90-day image passes)
+  n_comparison: 8          # Gaia comparison stars run through the same pipeline

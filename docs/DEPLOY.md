@@ -26,7 +26,7 @@ One-time setup: GitHub → Settings → Pages → Source: **GitHub Actions**.
 
 ## Backend (Azure Container Apps) — chosen host
 
-**Live:** https://spherex-api.redgrass-773e0da8.canadacentral.azurecontainerapps.io (`/api/health`). Image tag `v2`, deployed 14 Nov 2026.
+**Live:** https://spherex-api.redgrass-773e0da8.canadacentral.azurecontainerapps.io (`/api/health`). Image tag `v3`, deployed 14 Nov 2026 (adds `/cube`, `/lightcurve`, `/motion`, `frames?matched=1`, deblended spectra).
 
 Runs on an Azure for Students subscription: no card, paid from the student credit. Cloud Run (below) needed a billing account with a card hold, so we didn't use it.
 
@@ -42,7 +42,7 @@ What the script does:
 - Builds the image locally for `linux/amd64` and pushes it.
 - Deploys `spherex-api` with 1 vCPU / 2 GiB and 0–1 replicas, then prints the URL. Set `API_BASE` in `frontend/js/api.js` to it.
 
-Redeploy new code with `TAG=v2 scripts/deploy_azure.sh` (any new tag).
+Redeploy new code with `TAG=v4 scripts/deploy_azure.sh` (any new tag).
 
 Azure for Students restrictions this works around:
 - **Regions:** only `westus2`, `canadacentral`, `westus`, `norwayeast` and `francecentral` are allowed. `canadacentral` is the closest to the SPHEREx S3 mirror in Virginia.

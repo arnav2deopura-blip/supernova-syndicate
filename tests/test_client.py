@@ -37,7 +37,9 @@ def test_health():
 def test_errors_share_one_shape():
     for url, code in [
         ("/api/frames?ra=999&dec=0", "bad_request"),
-        ("/api/spectrum?ra=10&dec=0", "not_implemented"),
+        ("/api/spectrum?ra=10&dec=0&det=D9", "bad_request"),
+        ("/api/motion?ra=10&dec=0&det=X", "bad_request"),
+        ("/api/cube?ra=10&dec=0&det=D7", "bad_request"),
         ("/api/overlay?ra=10&dec=0&cat=nope", "bad_request"),
     ]:
         r = client.get(url)
@@ -53,6 +55,9 @@ def test_errors_share_one_shape():
     ("exposures", schemas.ExposuresResponse),
     ("spectrum", schemas.SpectrumResponse),
     ("overlay", schemas.OverlayResponse),
+    ("cube", schemas.CubeResponse),
+    ("lightcurve", schemas.LightCurveResponse),
+    ("motion", schemas.MotionResponse),
 ])
 def test_mocks_match_contract(name, model):
     """frontend/mock/ must always match backend/schemas.py (docs/API.md)."""

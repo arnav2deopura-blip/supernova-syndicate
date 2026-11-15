@@ -38,7 +38,11 @@ def output_grid(ra: float, dec: float, fov: float):
     return target_wcs(ra, dec, fov, cfg["pixel_scale_arcsec"] / cfg["oversample"])
 
 
-def build_frames(ra: float, dec: float, fov: float, band: str, progress: Progress = None) -> FrameProduct:
+def load_stamps(ra: float, dec: float, fov: float, band: str, progress: Progress = None
+                ) -> tuple[list[PreparedStamp], list[tuple[float, float]]]:
+    """Prepared stamps of one detector at a position, plus the position's shared pass bins (all detectors).
+    Raises NoCoverage. Stamps are disk-cached, so every product built from them (frames, cube, spectra,
+    light curves, motion) shares the downloads."""
     cfg = get_config()
     det = int(band[1])
     all_records = spherex_client.query_exposures(ra, dec, fov, progress=progress)
@@ -46,7 +50,6 @@ def build_frames(ra: float, dec: float, fov: float, band: str, progress: Progres
     records = [r for r in all_records if r.detector == det]
     if not records:
         raise NoCoverage(f"No SPHEREx {band} exposures cover RA {ra:.5f}, Dec {dec:.5f} in {cfg['release_tag']}.")
-
     stamps: list[PreparedStamp] = []
     for _, path in spherex_client.fetch_stamps(records, ra, dec, fov, progress=progress):
         with fits.open(path) as h:
@@ -56,6 +59,11 @@ def build_frames(ra: float, dec: float, fov: float, band: str, progress: Progres
     if not stamps:
         raise NoCoverage(f"No usable {band} stamps at RA {ra:.5f}, Dec {dec:.5f}.")
     _save_details(ra, dec, band, stamps)
+    return stamps, bins
+
+
+def build_frames(ra: float, dec: float, fov: float, band: str, progress: Progress = None) -> FrameProduct:
+    stamps, bins = load_stamps(ra, dec, fov, band, progress)
     return coadd_epochs(stamps, ra, dec, fov, band, progress, bins=bins)
 
 
