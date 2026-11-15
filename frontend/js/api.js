@@ -1,125 +1,246 @@
-// Keep the frontend/backend boundary here. Never substitute synthetic data for a failed real search.
-export const API_BASE = 'http://localhost:8000';
-const isDemo = () => typeof location !== 'undefined' && new URLSearchParams(location.search).has('mock');
+// All network calls live here. Owner: C (safeguards ported from Z's "frontend pass 1").
+// Order of fallbacks: live backend -> precomputed/<preset>/ (only when it matches the request exactly).
+// Synthetic mock data is shown only when asked for with ?mock: never as a silent stand-in for a failed search.
+
+// TODO (issue #11): set to the deployed backend URL.
+export const API_BASE = "http://localhost:8000";
+
+const isDemo = () => typeof location !== "undefined" && new URLSearchParams(location.search).has("mock");
+const POLL_MS = 1000;
+const TIMEOUT_MS = 20000;      // one request; a long job keeps polling, each poll is short
+
+/** fn(message, level): level 1 = precomputed bake, 2 = mock. */
+let onFallback = () => {};
+export function setFallbackHandler(fn) { onFallback = fn; }
+
 export class ApiError extends Error {
-  constructor(message, code = 'upstream_unavailable') {super(message); this.code = code;}
+  constructor(message, code = "upstream_unavailable", status) { super(message); this.code = code; this.status = status; }
 }
-const aborted = signal => {if(signal?.aborted) throw new DOMException('Cancelled', 'AbortError');};
-async function getJSON(url, {signal} = {}) {
+
+/** Errors that are real answers, not outages: never hide them behind a fallback. */
+export const isAnswer = (e) => e.name === "AbortError" || ["bad_request", "not_found", "invalid_response"].includes(e.code);
+
+const aborted = (signal) => { if (signal?.aborted) throw new DOMException("Cancelled", "AbortError"); };
+const withTimeout = (signal, ms = TIMEOUT_MS) => (AbortSignal.any && AbortSignal.timeout
+  ? AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(ms)]) : signal);
+
+async function fetchJSON(url, signal) {
   aborted(signal);
-  let response;
-  try {response = await fetch(url, {signal:AbortSignal.any([...(signal ? [signal] : []),AbortSignal.timeout(20000)])});}
-  catch(e) {
-    if(signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
-    throw new ApiError(e.name === 'TimeoutError' ? 'The data service took too long to respond. Please retry.' : 'The data service is unavailable. Check your connection or try a saved example target.');
+  let res;
+  try { res = await fetch(url, { signal: withTimeout(signal) }); }
+  catch (e) {
+    if (signal?.aborted) throw new DOMException("Cancelled", "AbortError");
+    throw new ApiError(e.name === "TimeoutError" ? "The data service took too long to respond. Please retry." : "The data service is unavailable.");
   }
-  let data;
-  try {data = await response.json();} catch {throw new ApiError('The data service returned an unreadable response. Please retry.', 'invalid_response');}
-  if (!response.ok) throw new ApiError(data.message || `No result is available (HTTP ${response.status}).`, data.error || (response.status === 404 ? 'not_found' : 'upstream_unavailable'));
-  return {data, status:response.status};
+  let body;
+  try { body = await res.json(); }
+  catch { if (res.ok) throw new ApiError("The data service returned an unreadable response. Please retry.", "invalid_response"); body = {}; }
+  if (!res.ok) throw new ApiError(body.message || `No result is available (HTTP ${res.status}).`, body.error || (res.status === 404 ? "not_found" : "upstream_unavailable"), res.status);
+  return { status: res.status, body };
 }
-const pause = (ms, signal) => new Promise((resolve,reject) => {
+const getJSON = async (url, signal) => (await fetchJSON(url, signal)).body;
+
+const sleep = (ms, signal) => new Promise((resolve, reject) => {
   aborted(signal);
-  const done = () => {signal?.removeEventListener('abort',cancel); resolve();};
-  const timer = setTimeout(done,ms);
-  const cancel = () => {clearTimeout(timer); reject(new DOMException('Cancelled','AbortError'));};
-  signal?.addEventListener('abort',cancel,{once:true});
+  const t = setTimeout(resolve, ms);
+  signal?.addEventListener("abort", () => { clearTimeout(t); reject(new DOMException("Cancelled", "AbortError")); }, { once: true });
 });
-async function live(endpoint, query, options) {
-  let url = `${API_BASE}/api/${endpoint}?${new URLSearchParams(Object.entries(query).filter(([,v])=>v !== undefined && v !== null))}`;
-  const deadline = Date.now()+15*60*1000;
-  let {data,status} = await getJSON(url,options);
-  while(status === 202 || data?.job_id) {
-    aborted(options.signal);
-    if(Date.now()>deadline) throw new ApiError('Preparation is taking longer than expected. Try this region again later; the server may still be preparing it.');
-    options.onProgress?.(data);
-    if(data.state === 'error') throw new ApiError(data.message || 'The requested observations could not be prepared.',data.error);
-    if(data.state === 'done') {
-      if(!data.result?.result_url) throw new ApiError('The completed request has no result URL.', 'invalid_response');
-      url = data.result.result_url;
-    } else {
-      await pause(1000,options.signal);
-      url = data.status_url || `${API_BASE}/api/jobs/${encodeURIComponent(data.job_id)}`;
+
+const liveURL = (endpoint, query) => `${API_BASE}/api/${endpoint}?${new URLSearchParams(clean(query))}`;
+const clean = (q) => Object.fromEntries(Object.entries(q).filter(([, v]) => v !== undefined && v !== null && v !== ""));
+const tag = (data, kind, label) => (data && typeof data === "object" ? Object.assign(data, { _provenance: { kind, label } }) : data);
+
+const separationRA = (a, b) => Math.abs(((a - b + 540) % 360) - 180);
+/** A saved bake may stand in only for exactly this field: centre (RA wraps at 0), band and size. */
+export function matchesSavedField(data, q) {
+  return Number.isFinite(data?.ra) && Number.isFinite(data?.dec)
+    && separationRA(data.ra, Number(q.ra)) < 0.00001 && Math.abs(data.dec - Number(q.dec)) < 0.00001
+    && (!q.band || data.band === q.band) && (q.fov === undefined || Math.abs(data.fov - Number(q.fov)) < 0.00001);
+}
+
+/**
+ * Call the live backend; on an outage try precomputed/<preset>/<file> (first that exists and passes `accept`).
+ * mock/<endpoint>.json only with ?mock. `live` may be overridden (the async job flow). `savedOnly` skips the backend.
+ */
+async function call(endpoint, query, { preset, files = [`${endpoint}.json`], accept = () => true, live, signal, savedOnly = false } = {}) {
+  aborted(signal);
+  if (isDemo()) {
+    onFallback("Showing MOCK data (synthetic, for development: not real observations).", 2);
+    return tag(await getJSON(`mock/${endpoint}.json`, signal), "mock", "Synthetic demo · not real observations");
+  }
+  let liveError = null;
+  if (!savedOnly) {
+    try {
+      return tag(await (live ? live() : getJSON(liveURL(endpoint, query), signal)), "live", "Live SPHEREx data");
+    } catch (e) {
+      if (isAnswer(e)) throw e;
+      liveError = e;
+      console.warn(`/api/${endpoint} failed:`, e.message);
     }
-    ({data,status} = await getJSON(url,options));
   }
-  return tag(data,'live','Live SPHEREx data');
-}
-function tag(data,kind,label) {return {...data,_provenance:{kind,label}};}
-const separationRA = (a,b) => Math.abs(((a-b+540)%360)-180);
-export function matchesSavedField(data,q) {
-  return Number.isFinite(data.ra) && Number.isFinite(data.dec) && separationRA(data.ra,Number(q.ra)) < 0.00001 && Math.abs(data.dec-Number(q.dec)) < 0.00001 && (!q.band || data.band === q.band) && (q.fov === undefined || Math.abs(data.fov-Number(q.fov))<0.00001);
-}
-async function saved(endpoint,q,options) {
-  if(!options.preset || !/^[a-z0-9-]+$/.test(options.preset)) throw new ApiError('No saved observations match this query.','not_found');
-  const name = endpoint === 'frames' ? `frames_matched_${q.band}` : endpoint === 'spectrum' ? `spectrum_${q.det}` : endpoint;
-  const {data} = await getJSON(`precomputed/${options.preset}/${name}.json`,options);
-  if(endpoint === 'frames' && (!matchesSavedField(data,q) || data.matched !== true)) throw new ApiError('The saved field does not match those coordinates, size, band, and matched wavelengths. A live backend is needed for this query.','not_found');
-  if(endpoint === 'spectrum' && !matchesSavedField(data,{ra:q.ra,dec:q.dec})) throw new ApiError('There is no saved spectrum for this pixel. Connect the backend to inspect a new position.','not_found');
-  return tag(data,'precomputed','Saved SPHEREx observations');
-}
-async function call(endpoint,q,options = {}) {
-  aborted(options.signal);
-  if(isDemo()) {
-    const {data} = await getJSON(`mock/${endpoint}.json`,options);
-    return tag(data,'mock','Synthetic demo · not real observations');
-  }
-  if(options.savedOnly) return saved(endpoint,q,options);
-  if(options.preferSaved && options.preset) {
-    try {return await saved(endpoint,q,options);} catch(e) {if(options.signal?.aborted) throw e;}
-  }
-  try {return await live(endpoint,q,options);}
-  catch(e) {
-    if(options.signal?.aborted || ['bad_request','not_found','invalid_response'].includes(e.code)) throw e;
-    if(options.preset) {
-      try {return await saved(endpoint,q,options);} catch { /* report the live failure */ }
+  if (preset && /^[a-z0-9-]+$/.test(preset)) {
+    for (const file of files) {
+      try {
+        const data = await getJSON(`precomputed/${preset}/${file}`, signal);
+        if (!accept(data)) continue;
+        if (!savedOnly) onFallback("Backend unreachable — showing precomputed data for this target.", 1);
+        return tag(data, "precomputed", "Saved SPHEREx observations");
+      } catch (e) { if (e.name === "AbortError") throw e; /* not baked */ }
     }
-    throw e;
   }
+  if (savedOnly || !liveError) throw new ApiError("No saved observations match this request. A live backend is needed for it.", "not_found");
+  // no saved copy: say what failed, and never invent data
+  throw preset ? new ApiError(`/${endpoint} is not available offline for this position.`, "offline") : liveError;
 }
-async function arrayData(value,options) {
-  if(Array.isArray(value)) return value;
-  if(typeof value !== 'string') throw new ApiError('An image array is missing.', 'invalid_response');
-  const url = new URL(value,location.href);
-  const response = await fetch(url,{signal:AbortSignal.any([...(options.signal ? [options.signal] : []),AbortSignal.timeout(30000)])});
-  if(!response.ok) throw new ApiError('An image or noise-map file is unavailable. Please retry.', 'invalid_response');
-  if(url.pathname.endsWith('.bin')) {
-    const buffer = await response.arrayBuffer();
-    if(buffer.byteLength%4) throw new ApiError('An image file has an invalid size.','invalid_response');
-    const view = new DataView(buffer);
-    return Array.from({length:buffer.byteLength/4},(_,i)=>{const v=view.getFloat32(i*4,true);return Number.isFinite(v)?v:null;});
+
+// `data` and `noise` in a frame may be a URL instead of an inline array (see docs/API.md).
+async function loadArray(ref, signal) {
+  if (typeof ref !== "string") return ref;
+  aborted(signal);
+  const res = await fetch(ref, { signal: withTimeout(signal, 30000) });
+  if (!res.ok) throw new ApiError(`An image or noise-map file is unavailable (HTTP ${res.status}). Please retry.`, "invalid_response", res.status);
+  if (ref.split("?")[0].endsWith(".bin")) {
+    const buf = await res.arrayBuffer();
+    if (buf.byteLength % 4) throw new ApiError("An image file has an invalid size.", "invalid_response");
+    const view = new DataView(buf);   // little-endian float32, whatever the machine
+    const arr = Array.from({ length: buf.byteLength / 4 }, (_, i) => view.getFloat32(i * 4, true));
+    return Array.from(arr, (v) => (Number.isFinite(v) ? v : null));
   }
-  return response.json();
+  return res.json();
 }
+
+async function inlineFrameData(resp, signal) {
+  await Promise.all(resp.frames.map(async (f) => {
+    f.data = await loadArray(f.data, signal);
+    // the noise map is optional: without it the σ-change view is unavailable, the rest still works
+    try {
+      f.noise = f.noise ? await loadArray(f.noise, signal) : null;
+      if (f.noise && f.noise.length !== f.data.length) f.noise = null;
+    } catch (e) { if (e.name === "AbortError") throw e; f.noise = null; }
+  }));
+  return resp;
+}
+
+/** Cube channel images: `data` (all passes) or `frames[].data` (per_pass=1). */
+async function inlineCubeData(resp, signal) {
+  const jobs = [];
+  for (const ch of resp.channels || []) {
+    if (ch.data) jobs.push(loadArray(ch.data, signal).then((a) => { ch.data = a; }));
+    for (const f of ch.frames || []) jobs.push(loadArray(f.data, signal).then((a) => { f.data = a; }));
+  }
+  await Promise.all(jobs);
+  return resp;
+}
+
+/**
+ * Check a /frames response before anything is drawn: valid WCS, one array of the right size per frame, finite
+ * times, at least one usable pixel. Sorts frames by observation time.
+ */
 export function validateFrames(response) {
-  const wcs=response?.wcs;
-  if(!wcs || !Number.isInteger(wcs.width) || !Number.isInteger(wcs.height) || wcs.width<1 || wcs.height<1 || !Number.isFinite(wcs.center_ra) || wcs.center_ra < 0 || wcs.center_ra >= 360 || !Number.isFinite(wcs.center_dec) || Math.abs(wcs.center_dec) > 90 || !Number.isFinite(wcs.pixel_scale_arcsec) || wcs.pixel_scale_arcsec <= 0) throw new ApiError('The observations have missing or invalid sky coordinates.','invalid_response');
-  if(!Array.isArray(response.frames) || !response.frames.length) throw new ApiError('No observation periods are available for this region and band. Try another band or a nearby region.','not_found');
-  for(const f of response.frames) {
-    if(!f || typeof f !== 'object' || (f.mjd_mean != null && !Number.isFinite(f.mjd_mean))) throw new ApiError('An observation has missing or invalid metadata.','invalid_response');
-    if(!Array.isArray(f.data) || f.data.length!==wcs.width*wcs.height || f.width!==wcs.width || f.height!==wcs.height || !Number.isFinite(f.mjd_start) || !Number.isFinite(f.mjd_end) || f.mjd_end < f.mjd_start) throw new ApiError('An observation has an invalid image size or time range.','invalid_response');
-    if(!f.data.some(Number.isFinite)) throw new ApiError('An observation contains no usable pixels. Try a different band or region.','not_found');
-    if(f.data.some(v=>v!==null && !Number.isFinite(v))) throw new ApiError('An observation contains invalid pixel values.','invalid_response');
+  const wcs = response?.wcs;
+  if (!wcs || !Number.isInteger(wcs.width) || !Number.isInteger(wcs.height) || wcs.width < 1 || wcs.height < 1
+    || !Number.isFinite(wcs.center_ra) || wcs.center_ra < 0 || wcs.center_ra >= 360 || !Number.isFinite(wcs.center_dec) || Math.abs(wcs.center_dec) > 90
+    || !Number.isFinite(wcs.pixel_scale_arcsec) || wcs.pixel_scale_arcsec <= 0) throw new ApiError("The observations have missing or invalid sky coordinates.", "invalid_response");
+  if (!Array.isArray(response.frames) || !response.frames.length) throw new ApiError("No observation periods are available for this region and band. Try another band or a nearby region.", "not_found");
+  for (const f of response.frames) {
+    if (!f || typeof f !== "object" || (f.mjd_mean != null && !Number.isFinite(f.mjd_mean))) throw new ApiError("An observation has missing or invalid metadata.", "invalid_response");
+    if (!Array.isArray(f.data) || f.data.length !== wcs.width * wcs.height || f.width !== wcs.width || f.height !== wcs.height
+      || !Number.isFinite(f.mjd_start) || !Number.isFinite(f.mjd_end) || f.mjd_end < f.mjd_start) throw new ApiError("An observation has an invalid image size or time range.", "invalid_response");
+    if (f.data.some((v) => v !== null && (typeof v !== "number" || !Number.isFinite(v)))) throw new ApiError("An observation contains invalid pixel values.", "invalid_response");
+    if (!f.data.some((v) => v !== null)) throw new ApiError("An observation contains no usable pixels. Try a different band or region.", "not_found");
   }
-  response.frames.sort((a,b)=>(a.mjd_mean??a.mjd_start)-(b.mjd_mean??b.mjd_start));
+  response.frames.sort((a, b) => (a.mjd_mean ?? a.mjd_start) - (b.mjd_mean ?? b.mjd_start));
   return response;
 }
+
+/**
+ * Ask for a product with async=1. 200 = cached, use it. 202 = a job: poll its status_url every second,
+ * reporting progress, until done (then fetch result.result_url) or error.
+ */
+async function runJob(url, { onProgress = () => {}, signal } = {}) {
+  const sep = url.includes("?") ? "&" : "?";
+  const first = await fetchJSON(`${url}${sep}async=1`, signal);
+  if (first.status !== 202) return first.body;
+  let job = first.body;
+  const statusURL = job.status_url || `${API_BASE}/api/jobs/${job.job_id}`;
+  for (;;) {
+    onProgress(job);
+    if (job.state === "done") {
+      if (!job.result?.result_url) throw new ApiError("The finished job has no result URL.", "invalid_response");
+      return getJSON(job.result.result_url, signal);
+    }
+    if (job.state === "error") throw new ApiError(job.message || "The backend could not build this product.", job.error || "upstream_unavailable");
+    await sleep(POLL_MS, signal);
+    job = await getJSON(statusURL, signal);
+  }
+}
+
 export const api = {
-  resolve: (name,options={}) => call('resolve',{name},options),
-  async frames(q,options={}) {
-    const response=await call('frames',{...q,matched:1,async:1},options);
-    if(!Array.isArray(response.frames) || response.frames.some(f=>!f || typeof f!=='object')) throw new ApiError('No valid image frames were returned.','invalid_response');
-    await Promise.all(response.frames.map(async f=>{
-      f.data=await arrayData(f.data,options);
-      if(f.noise) {
-        try {f.noiseData=await arrayData(f.noise,options);if(f.noiseData.length!==f.data.length) throw new Error('Noise-map dimensions do not match.');}
-        catch(e) {if(options.signal?.aborted) throw e;delete f.noiseData;f._noiseError=true;}
-      }
-    }));
-    validateFrames(response);
-    if(response._provenance.kind!=='mock' && (response.matched!==true || !response.matched_channels?.length)) throw new ApiError('The service did not return wavelength-matched observations. A reliable brightness comparison is unavailable.','invalid_response');
-    return response;
+  resolve: (name, opts = {}) => call("resolve", { name }, opts),
+
+  /** Frames for one band. Uses the async job flow so cold positions show progress instead of hanging. */
+  frames: (q, { preset, onProgress, signal, savedOnly } = {}) => {
+    const query = { ra: q.ra, dec: q.dec, fov: q.fov, band: q.band, matched: q.matched ? 1 : undefined };
+    return call("frames", query, {
+      preset, signal, savedOnly,
+      live: () => runJob(liveURL("frames", query), { onProgress, signal }),
+      files: [q.matched ? `frames_matched_${q.band}.json` : "frames.json"],
+      // a preset bake covers one field, band and FOV: only use it when it matches the request exactly
+      accept: (d) => matchesSavedField(d, q) && !!d.matched === !!q.matched,
+    }).then((r) => inlineFrameData(r, signal)).then(validateFrames);
   },
-  overlay:(q,options={})=>call('overlay',{...q,cat:'gaia'},options),
-  spectrum:(q,options={})=>call('spectrum',{...q,async:1},options)
+
+  exposures: (q, opts = {}) => call("exposures", { ra: q.ra, dec: q.dec, fov: q.fov }, opts),
+
+  spectrum: (q, opts = {}) => call("spectrum", q, {
+    ...opts,
+    live: () => runJob(liveURL("spectrum", q), { onProgress: opts.onProgress, signal: opts.signal }),
+    files: [`spectrum_${q.det || "all"}.json`, "spectrum_all.json"],
+  }),
+
+  overlay: (q, opts = {}) => call("overlay", { ...q, cat: "gaia" }, opts),
+
+  /** Discovery mode: movers in the field (may be a slow job on a new position; runs silently). */
+  movers: (q, { preset, signal } = {}) => {
+    const query = { ra: q.ra, dec: q.dec, fov: q.fov, band: q.band };
+    return call("movers", query, {
+      preset, signal,
+      live: () => runJob(liveURL("movers", query), { signal }),
+      files: [`movers_${q.band}.json`],
+      accept: (d) => d.band === q.band && Math.abs(d.fov - q.fov) < 1e-6,
+    });
+  },
+
+  /** The 102-band view, one detector per call. perPass: one image per channel per pass. */
+  cube: (q, { preset, onProgress, signal } = {}) => {
+    const query = { ra: q.ra, dec: q.dec, fov: q.fov, det: q.det, per_pass: q.perPass ? 1 : undefined };
+    return call("cube", query, {
+      preset, signal,
+      live: () => runJob(liveURL("cube", query), { onProgress, signal }),
+      files: [q.perPass ? `cube_pp_${q.det}.json` : `cube_${q.det}.json`],
+      accept: (d) => d.det === q.det && !!d.per_pass === !!q.perPass && Math.abs(d.fov - q.fov) < 1e-6,
+    }).then((r) => inlineCubeData(r, signal));
+  },
+
+  motion: (q, { preset, signal } = {}) => call("motion", q, {
+    preset, signal,
+    live: () => runJob(liveURL("motion", q), { signal }),
+    files: [`motion_${q.det}.json`],
+  }),
+
+  lightcurve: (q, { preset, signal } = {}) => call("lightcurve", q, {
+    preset, signal,
+    live: () => runJob(liveURL("lightcurve", q), { signal }),
+    files: [`lightcurve_${q.det}.json`],
+    accept: (d) => d.det === q.det,
+  }),
+
+  /** Direct link to the frames as multi-extension FITS (live backend only). */
+  framesFitsURL: (q) => `${API_BASE}/api/frames.fits?${new URLSearchParams(clean({ ra: q.ra, dec: q.dec, fov: q.fov, band: q.band, matched: q.matched ? 1 : undefined }))}`,
+
+  /** Server build info (data span). Live only: no fallback, returns null when unreachable. */
+  meta: async ({ check = false } = {}) => {
+    if (isDemo()) return null;
+    try { return await getJSON(`${API_BASE}/api/meta${check ? "?check=1" : ""}`); } catch { return null; }
+  },
 };

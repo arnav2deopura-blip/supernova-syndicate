@@ -16,11 +16,23 @@ Built by **Supernova Syndicate** for the 2026 NASA Space Apps Challenge (SPHEREx
 
 | Target | What to look for | Link |
 |---|---|---|
-| Barnard's Star | Fast mover, dipole in difference mode | _TODO `?ra=&dec=`_ |
-| Epsilon Indi B | Faint mover near a bright star | _TODO_ |
-| WISE 0855-0714 | Very faint, very red mover (D6 only) | _TODO_ |
-| RW Aurigae | Irregular variable | _TODO_ |
-| R Draconis | Mira variable, light curve | _TODO_ |
+| Barnard's Star | Fast mover, dipole in difference mode | `?name=Barnard%27s+Star&band=D2` |
+| Epsilon Indi B | Faint mover near a bright star | `?name=eps+Indi+B&band=D3` |
+| WISE 0855-0714 | Very faint, very red mover (D6 only) | `?name=WISE+J085510.83-071442.5&band=D6` |
+| RW Aurigae | Irregular variable | `?name=RW+Aur&band=D2` |
+| R Draconis | Mira variable, light curve | `?name=R+Dra&band=D2` |
+
+## Three ways to pick a target
+
+All three end in the same comparison viewer (blink, difference, sum, Gaia overlay, click-for-spectrum):
+
+| Mode | How | Backend |
+|---|---|---|
+| **Explore the sky** | Pan and zoom the SPHEREx DR1 all-sky map ([IRSA HiPS cube](https://irsa.ipac.caltech.edu/data/hips/SPHEREx/spherex_allsky_cube), via Aladin Lite), with a slider over all 102 channels. Click to drop a box of the chosen FOV, or Shift+drag (or "Draw box" on touch) to draw one, up to 0.5°. A coverage check shows the exposures and passes before you compare | `/api/exposures`, then `/api/frames` |
+| **Object name** | Type a name (recent searches and the test targets are suggested). It resolves through SIMBAD and is propagated to now; the proper motion is used for the spectrum | `/api/resolve`, then `/api/frames` |
+| **Coordinates** | RA/Dec in decimal degrees or sexagesimal (`17:57:47 +04:46:14`), or both pasted into one box | `/api/frames` |
+
+A position nobody has asked for yet takes 1–10 min to build. The page runs it as a background job (`async=1`), shows the stage and a progress bar, and can cancel; the server keeps building, so the next request is fast. URLs keep the state: `?mode=explore|name|coords&ra=&dec=&fov=&band=&matched=1&name=`.
 
 ## How it works
 
@@ -34,13 +46,22 @@ A single SPHEREx exposure isn't one colour: each detector sits behind a linear v
 
 ## Features
 
-- [ ] RA/Dec or name input, with proper-motion correction
-- [ ] Epoch blink per detector band, play/pause, speed
-- [ ] Stretch and colormap controls, all in the browser
-- [ ] Difference and sum modes
-- [ ] Gaia DR3 overlay with proper-motion arrows
-- [ ] Click for a quick-look spectrum; light curves
-- [ ] Shareable URLs: `?ra=&dec=&fov=&band=`
+- [x] Three search modes: explore the sky map, object name, RA/Dec
+- [x] Progress and cancel for slow first requests (async jobs)
+- [x] Play passes (blink) per detector band, play/pause/step, speed, a timeline of passes on a real time axis
+- [x] Difference and **Changes (σ)** between any two passes, from the calibrated noise maps; Sum
+- [x] **"What changed?" markers**: regions ≥ 5σ circled automatically (○ brighter/new, ✕ fainter/gone, → moved, ◐ variable; dashed = uncertain), merged with Gaia known movers, the `/api/movers` search and the `/api/lightcurve` verdict, listed as Events
+- [x] Per-event card: each pass at that spot with S/N, one-click "Is it new?" checks (SIMBAD, CatWISE, Gaia, IRSA Finder Chart, SkyBoT), JSON/CSV report
+- [x] Skippable guided tour (`?tour=1`, "?" button), "What am I looking at?" field guide, glossary ⓘ tooltips, plain-language controls
+- [x] 102 bands browsable: whole detector band, a channel range inside one detector, molecule presets (water ice, PAH/CH₄, CO₂ ice, CO), and a Colours view that plays through a band's 17 channels
+- [x] Advanced drawer: per-pass and per-exposure metadata, SPHEREx-only proper motion, photometry, derived physics (Unknown + reason when an input is missing), exports, citation
+- [x] Gaia DR3 overlay with proper-motion tracks; click for a spectrum
+- [x] Save image / movie, `?embed=1` bare player, reduced-motion respected, phone layout
+- [x] Shareable URLs: `?mode=&ra=&dec=&fov=&band=&matched=&name=&view=&a=&b=&ch=`
+
+The change detector runs in the browser (`frontend/js/changes.js`); `node scripts/check_changes.mjs --inject` runs it on the five presets and checks that injected fake sources are recovered.
+
+Frontend tests (no browser needed): `node --test frontend/tests/*.mjs`. Offline, the page uses the saved bakes only when they match the request exactly; synthetic data appears only with `?mock`. Fair brightness comparison (matched wavelengths) is on by default; `?matched=0` turns it off.
 
 ## Science products (backend API)
 

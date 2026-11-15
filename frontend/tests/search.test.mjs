@@ -4,6 +4,8 @@ import { parseCoord, validateQuery, mjdDate } from '../js/coordinates.js';
 import { ApiError, API_BASE, api, matchesSavedField, validateFrames } from '../js/api.js';
 
 const query = () => ({ ra: 269.4486, dec: 4.7394, fov: 0.04, band: 'D2' });
+// fair brightness comparison (matched wavelengths) is a request option in this frontend, on by default in the UI
+const matchedQuery = () => ({ ...query(), matched: true });
 function frames() {
   return {
     ...query(), units: 'MJy/sr', matched: true, matched_channels: ['D2C01'],
@@ -154,18 +156,18 @@ test('saved frames use the requested matched-band file and decode little-endian 
     assert.equal(url, 'precomputed/barnards-star/frames_matched_D2.json');
     return json(response);
   });
-  const result = await api.frames(query(), { preset: 'barnards-star', savedOnly: true });
+  const result = await api.frames(matchedQuery(), { preset: 'barnards-star', savedOnly: true });
   assert.equal(result._provenance.kind, 'precomputed');
   assert.deepEqual(result.frames[1].data, [12, 3, null, 5]);
-  assert.deepEqual(result.frames[1].noiseData, [2, 2, null, 2]);
+  assert.deepEqual(result.frames[1].noise, [2, 2, null, 2]);
   assert.equal(calls.length, 3);
 });
 
 test('saved mismatches fail explicitly and never substitute a demo field', async (t) => {
   const calls = mockBrowser(t, () => json({ ...frames(), fov: 0.1 }));
-  await assert.rejects(api.frames(query(), { preset: 'barnards-star', savedOnly: true }), apiFailure('not_found'));
+  await assert.rejects(api.frames(matchedQuery(), { preset: 'barnards-star', savedOnly: true }), apiFailure('not_found'));
   assert.deepEqual(calls, ['precomputed/barnards-star/frames_matched_D2.json']);
-  await assert.rejects(api.frames(query(), { preset: '../other', savedOnly: true }), apiFailure('not_found'));
+  await assert.rejects(api.frames(matchedQuery(), { preset: '../other', savedOnly: true }), apiFailure('not_found'));
   assert.equal(calls.length, 1);
 });
 
@@ -187,7 +189,7 @@ test('jobs progress from queued to running to done before fetching the final ima
     return json(frames());
   });
   const progress = [];
-  const result = await api.frames(query(), { onProgress: (state) => {
+  const result = await api.frames(matchedQuery(), { onProgress: (state) => {
     progress.push(state.state);
     queueMicrotask(() => t.mock.timers.tick(1000));
   } });
@@ -215,10 +217,10 @@ test('an outage may use matching saved observations, while demo data is explicit
   const calls = mockBrowser(t, (url) => url.startsWith(API_BASE)
     ? json({ error: 'upstream_unavailable', message: 'Archive is unavailable.' }, 503)
     : json(frames()));
-  assert.equal((await api.frames(query(), { preset: 'barnards-star' }))._provenance.kind, 'precomputed');
+  assert.equal((await api.frames(matchedQuery(), { preset: 'barnards-star' }))._provenance.kind, 'precomputed');
   assert.equal(calls.length, 2);
   location.search = '?mock=1';
-  const result = await api.frames(query());
+  const result = await api.frames(matchedQuery());
   assert.equal(calls.at(-1), 'mock/frames.json');
   assert.equal(result._provenance.kind, 'mock');
 });

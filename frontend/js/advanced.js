@@ -1,139 +1,163 @@
-// Scientific readouts use response metadata and loaded arrays, never inferred FITS headers.
-// IMAGE is surface brightness (MJy/sr); fitted spectrum fluxes are a separate µJy product.
-const NATIVE_PIXEL_ARCSEC = 6.15;
-const JULIAN_YEAR_DAYS = 365.25;
-const finite = (value) => typeof value === "number" && Number.isFinite(value);
-const numericArray = (value) => Array.isArray(value) || ArrayBuffer.isView(value);
-const fmt = (value, digits = 3) => finite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: digits }) : "Unknown";
-const median = (values) => {
-  if (!values.length) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
-};
-const representativeMjd = (frame) => finite(frame.mjd_mean) ? frame.mjd_mean
-  : finite(frame.mjd_start) && finite(frame.mjd_end) ? (frame.mjd_start + frame.mjd_end) / 2 : null;
-const unitLabel = (units) => typeof units === "string" && units.trim() ? units.trim() : null;
-const isBrightnessUnit = (units) => typeof units === "string" && /^MJy\s*\/\s*sr$/.test(units);
+// Advanced drawer for professionals: per-pass and per-exposure metadata, astrometry, photometry, derived physics
+// and exports. Rule: never fabricate — a missing value shows "Unknown" with the reason on hover. Owner: C.
+import { el, download, toCSV, mjdDate } from "./events-ui.js";
+import { renderFieldMetrics } from "./field-metrics.js";
+import { galactic, ecliptic, distance, tangentialVelocity, passMagnitudes, reducedPM, blackbodyT, falseAlarms } from "./astro.js";
 
-/** Pure calculations, exported so numerical and missing-data behavior can be checked offline. */
-export function deriveAdvanced({ frames: response = null, spectrum = null, source = null, selectedPixel = null, resolved = null } = {}) {
-  const frames = Array.isArray(response?.frames) ? response.frames : [];
-  const wcs = response?.wcs || {};
-  const shapeKnown = Number.isInteger(wcs.width) && wcs.width > 0 && Number.isInteger(wcs.height) && wcs.height > 0;
-  const size = shapeKnown ? wcs.width * wcs.height : null;
-  const loaded = frames.filter((frame) => size && numericArray(frame.data) && frame.data.length === size && frame.width === wcs.width && frame.height === wcs.height);
-  const times = frames.map(representativeMjd);
-  const timed = frames.map((frame, index) => ({ frame, time: times[index] })).filter(({ time }) => finite(time)).sort((a, b) => a.time - b.time);
-  const first = timed[0]?.frame, last = timed.at(-1)?.frame;
-  const baselineDays = timed.length === frames.length && timed.length > 1 ? timed.at(-1).time - timed[0].time : null;
-  const allEdges = frames.length && frames.every((frame) => finite(frame.mjd_start) && finite(frame.mjd_end));
-  const observationSpanDays = allEdges ? Math.max(...frames.map((frame) => frame.mjd_end)) - Math.min(...frames.map((frame) => frame.mjd_start)) : null;
-  const coverage = loaded.length === frames.length && frames.length > 0
-    ? loaded.reduce((sum, frame) => sum + Array.from(frame.data).filter(finite).length, 0) / (size * frames.length) : null;
-  const scale = finite(wcs.pixel_scale_arcsec) && wcs.pixel_scale_arcsec > 0 ? wcs.pixel_scale_arcsec : null;
-  const wavelengths = frames.map((frame) => frame.lam_eff_um).filter((value) => finite(value) && value > 0);
-  const wavelengthSpread = wavelengths.length === frames.length && wavelengths.length > 1 ? Math.max(...wavelengths) - Math.min(...wavelengths) : null;
-  const matched = response?.matched === true && Array.isArray(response.matched_channels) && response.matched_channels.length > 0;
-  const exposureCount = frames.length > 0 && frames.every((frame) => Number.isInteger(frame.n_exposures) && frame.n_exposures >= 0)
-    ? frames.reduce((sum, frame) => sum + frame.n_exposures, 0) : null;
-  const targetFlagsKnown = frames.length > 0 && frames.every((frame) => Array.isArray(frame.target_flags));
-  const targetFlags = targetFlagsKnown ? [...new Set(frames.flatMap((frame) => frame.target_flags))] : null;
-  const astrometry = frames.map((frame) => finite(frame.astrometry_rms_arcsec) ? frame.astrometry_rms_arcsec : frame.astrometry?.rms_arcsec);
-  const astrometryRms = astrometry.length > 0 && astrometry.every((value) => finite(value) && value >= 0) ? Math.max(...astrometry) : null;
-  let index = null;
-  if (shapeKnown && selectedPixel) {
-    if (Number.isInteger(selectedPixel.index) && selectedPixel.index >= 0 && selectedPixel.index < size) index = selectedPixel.index;
-    else if (Number.isInteger(selectedPixel.x) && Number.isInteger(selectedPixel.y) && selectedPixel.x >= 0 && selectedPixel.x < wcs.width && selectedPixel.y >= 0 && selectedPixel.y < wcs.height) index = selectedPixel.y * wcs.width + selectedPixel.x;
-  }
-  const pairLoaded = index !== null && first && last && first !== last && loaded.includes(first) && loaded.includes(last);
-  const units = unitLabel(response?.units);
-  const pixelDelta = pairLoaded && finite(first.data[index]) && finite(last.data[index]) ? last.data[index] - first.data[index] : null;
-  const noiseA = first?.noiseData || first?.noise, noiseB = last?.noiseData || last?.noise;
-  const mapsLoaded = pairLoaded && numericArray(noiseA) && numericArray(noiseB) && noiseA.length === size && noiseB.length === size;
-  const sourceKind = typeof source === "string" ? source : source?.kind;
-  const calibrated = finite(first?.noise_scale) && first.noise_scale > 0 && finite(last?.noise_scale) && last.noise_scale > 0;
-  const sigmaReady = mapsLoaded && calibrated && matched && ["live", "precomputed"].includes(sourceKind) && isBrightnessUnit(units) && finite(noiseA[index]) && noiseA[index] > 0 && finite(noiseB[index]) && noiseB[index] > 0;
-  const pixelError = sigmaReady ? Math.hypot(noiseA[index], noiseB[index]) : null;
-  const pixelPull = finite(pixelDelta) && pixelError > 0 ? pixelDelta / pixelError : null;
-  const spectrumPoints = Array.isArray(spectrum?.points) ? spectrum.points : [];
-  const usable = spectrumPoints.filter((point) => point.flagged === false && finite(point.flux) && finite(point.flux_err) && point.flux_err > 0 && point.fit !== "failed");
-  const spectrumSnr = usable.length ? median(usable.map((point) => point.flux / point.flux_err)) : null;
-  const totalPm = finite(resolved?.pmra) && finite(resolved?.pmdec) ? Math.hypot(resolved.pmra, resolved.pmdec) : null;
-  return { frameCount: frames.length, baselineDays, observationSpanDays, coverage, scale,
-    nativePixelArcsec: NATIVE_PIXEL_ARCSEC, resampling: scale ? NATIVE_PIXEL_ARCSEC / scale : null,
-    fieldWidthArcmin: shapeKnown && scale ? wcs.width * scale / 60 : null,
-    fieldHeightArcmin: shapeKnown && scale ? wcs.height * scale / 60 : null,
-    exposureCount, wavelengthSpread, matched, matchedChannels: matched ? response.matched_channels.length : null,
-    effectiveWavelength: finite(response?.lam_eff_um) && response.lam_eff_um > 0 ? response.lam_eff_um : null,
-    targetFlags, astrometryRms, selectedIndex: index, pixelDelta, pixelError, pixelPull, units,
-    pairLabel: first && last && first !== last ? `${last.epoch_label} − ${first.epoch_label}` : null,
-    spectrumCount: spectrumPoints.length, usableSpectrumCount: usable.length, spectrumSnr,
-    totalPm, predictedShift: finite(totalPm) && finite(baselineDays) ? totalPm / 1000 * baselineDays / JULIAN_YEAR_DAYS : null,
-    sourceKind, release: typeof response?.release === "string" ? response.release : null,
-    approximateEpochTimes: frames.some((frame) => !finite(frame.mjd_mean)),
-  };
+const f = (v, d = 2) => (v == null || !Number.isFinite(+v) ? null : (+v).toFixed(d));
+const unk = (why) => el("span", { class: "unknown", title: why, tabindex: "0", text: "Unknown" });
+/** A value, or Unknown with a reason. */
+const val = (v, why, unit = "") => (v == null ? unk(why) : `${v}${unit}`);
+
+function table(headers, rows) {
+  const t = el("table");
+  t.append(el("thead", {}, el("tr", {}, ...headers.map((h) => el("th", { class: h.num ? "num" : "", text: h.label ?? h })))));
+  const tb = el("tbody");
+  for (const r of rows) tb.append(el("tr", {}, ...r.map((c, i) => el("td", { class: headers[i]?.num ? "num" : "" }, c ?? unk("Not in the response")))));
+  t.append(tb);
+  return t;
 }
+const dl = (pairs) => el("dl", {}, ...pairs.flatMap(([k, v, formula]) => [el("dt", { text: k }), el("dd", {}, v, formula ? el("div", { class: "formula", text: formula }) : null)]));
+const section = (title, ...kids) => el("section", {}, el("h3", { text: title }), ...kids);
+const loadingOr = (state, why, build) => (state === "loading" ? el("p", { class: "hint", text: "Loading…" })
+  : state?.error ? el("p", { class: "hint" }, unk(state.error), ` — ${state.error}`) : !state ? el("p", { class: "hint", text: why }) : build(state));
 
-function element(tag, text, className) {
-  const node = document.createElement(tag);
-  if (text !== undefined) node.textContent = text;
-  if (className) node.className = className;
-  return node;
-}
+export { deriveAdvanced } from "./field-metrics.js";
 
-function addMetric(grid, label, value, explanation, kind = "Derived") {
-  const item = element("div", undefined, "science-metric");
-  item.append(element("dt", label));
-  item.append(element("dd", value ?? "Unknown"));
-  item.append(element("small", `${kind}. ${explanation}`, "science-note"));
-  grid.append(item);
-}
+export function renderAdvanced(body, ctx) {
+  const { target, resp, band, matched, exposures, motion, lightcurve, movers, events, spectrum, threshold, fitsURL, sexa, pick } = ctx;
+  if (!target || !resp) { body.replaceChildren(el("p", { class: "hint", text: "Load a target first." })); return; }
+  const frames = resp.frames;
+  const out = [];
 
-/** Render inside an existing advanced <details> or panel. Missing measurements stay Unknown. */
-export function renderAdvanced(container, input = {}) {
-  if (!container) return;
-  const d = deriveAdvanced(input);
-  container.replaceChildren();
-  const provenance = element("p", undefined, "science-provenance");
-  const sourceLabels = { live: "Live backend", precomputed: "Saved SPHEREx observations", mock: "Synthetic demonstration" };
-  provenance.textContent = `Data: ${sourceLabels[d.sourceKind] || "Unknown source"} · Release: ${d.release || "Unknown"}`;
-  container.append(provenance);
-  if (input.error) container.append(element("p", String(input.error), "science-note science-warning"));
-  if (d.sourceKind === "mock") container.append(element("p", "Synthetic data: these numbers demonstrate the calculations and cannot support a discovery.", "science-note science-warning"));
-  const grid = element("dl", undefined, "science-grid");
-  addMetric(grid, "Observation periods", d.frameCount || "Unknown", "An epoch groups observations from one sky pass.", "Response metadata");
-  addMetric(grid, "Epoch baseline", finite(d.baselineDays) ? `${fmt(d.baselineDays, 2)} days · ${fmt(d.baselineDays / JULIAN_YEAR_DAYS, 3)} years` : "Unknown", `Latest − earliest mean MJD.${d.approximateEpochTimes ? " A midpoint is used where a mean MJD is missing." : ""}`);
-  addMetric(grid, "Total observing span", finite(d.observationSpanDays) ? `${fmt(d.observationSpanDays, 2)} days` : "Unknown", "Latest exposure end − earliest exposure start; gaps are included.");
-  addMetric(grid, "Contributing exposures", d.exposureCount === null ? "Unknown" : fmt(d.exposureCount, 0), "Sum of n_exposures across displayed epochs.");
-  addMetric(grid, "Output pixel sampling", d.scale ? `${fmt(d.scale)}″ / pixel` : "Unknown", "Sampling of the resampled grid; this is not the angular resolution.", "WCS metadata");
-  addMetric(grid, "Native detector pixel", `${NATIVE_PIXEL_ARCSEC}″`, `Instrument reference.${d.resampling ? ` Output grid samples each native pixel about ${fmt(d.resampling, 2)}× per axis.` : ""} Resampling creates no new resolving power.`, "IRSA documentation");
-  addMetric(grid, "Grid field of view", finite(d.fieldWidthArcmin) ? `${fmt(d.fieldWidthArcmin)}′ × ${fmt(d.fieldHeightArcmin)}′` : "Unknown", "Grid dimensions × pixel scale / 60; tangent-plane angular approximation.");
-  addMetric(grid, "Finite image pixels", finite(d.coverage) ? `${fmt(100 * d.coverage, 2)}%` : "Unknown", "Finite pixels / all pixels across loaded frames. This is coverage, not a guarantee of photometric quality.");
-  addMetric(grid, "Wavelength matching", d.matched ? `${d.matchedChannels} shared channels` : input.frames?.matched === false ? "Unmatched" : "Unknown", "Only an explicit matched response with a shared-channel list confirms bandpass matching.", "Response metadata");
-  addMetric(grid, "Matched effective wavelength", finite(d.effectiveWavelength) ? `${fmt(d.effectiveWavelength, 4)} µm` : "Unknown", "Effective wavelength reported by the backend, when supplied.", "Response metadata");
-  addMetric(grid, "Epoch wavelength spread", finite(d.wavelengthSpread) ? `${fmt(d.wavelengthSpread, 4)} µm` : "Unknown", "Maximum − minimum epoch effective wavelength. Different sampling can imitate brightness changes.");
-  addMetric(grid, "Target quality flags", d.targetFlags ? d.targetFlags.length ? d.targetFlags.join(", ") : "None reported" : "Unknown", "Flags concern the field centre. They are not a quality assessment of every clicked pixel.", "Response metadata");
-  addMetric(grid, "Largest registration scatter", finite(d.astrometryRms) ? `${fmt(d.astrometryRms)}″` : "Unknown", "Maximum reported per-epoch Gaia reference-star RMS; not the uncertainty of an individual source.", "Response metadata");
-  addMetric(grid, "Selected pixel change", finite(d.pixelDelta) && d.units ? `${fmt(d.pixelDelta, 5)} ${d.units}` : "Unknown", `${d.pairLabel || "Latest − earliest epoch"}. Click an image pixel. Surface brightness is not integrated source flux.`);
-  addMetric(grid, "Difference / background noise", finite(d.pixelPull) ? `${fmt(d.pixelPull, 2)} σ` : "Unknown", "ΔI / √(σearly² + σlate²), assuming independent epochs. Requires matched channels, loaded calibrated noise maps, known units, and real data. A residual is not a discovery significance.");
-  addMetric(grid, "Usable spectrum measurements", input.spectrum ? `${d.usableSpectrumCount} / ${d.spectrumCount}` : "Unknown", "Only unflagged finite fluxes with positive finite uncertainties are used; failed fits are excluded.");
-  addMetric(grid, "Median spectral signal / noise", finite(d.spectrumSnr) ? fmt(d.spectrumSnr, 2) : "Unknown", "Median Fν / σF over usable measurements. Flux and uncertainty are both µJy; the ratio is dimensionless.");
-  if (finite(d.totalPm)) {
-    addMetric(grid, "Field-centre catalog motion", `${fmt(d.totalPm, 1)} mas / year`, `For ${input.resolved?.name || "the named field-centre target"}, not an arbitrary clicked star. √(pmra² + pmdec²); pmra already includes cos(dec). A catalog value, not a new measurement.`);
-    addMetric(grid, "Predicted target displacement", finite(d.predictedShift) ? `${fmt(d.predictedShift)}″` : "Unknown", "For the named field-centre target. Proper motion × epoch baseline / 1000 / 365.25. Linear prediction; parallax is excluded.");
+  // ---- passes ----
+  out.push(section("Passes",
+    el("p", { class: "hint", text: `${band}${matched ? `, matched channels ${resp.matched_channels?.join(", ") || "?"} (λ_eff ${f(resp.lam_eff_um, 3) ?? "?"} µm)` : ""} · release ${resp.release || "unknown"} · ${resp.units || "MJy/sr"}` }),
+    table(["Pass", "Dates", { label: "MJD mean", num: true }, { label: "Exp. used", num: true }, { label: "dropped", num: true }, { label: "λ_eff µm", num: true },
+      { label: "noise ×", num: true }, { label: "reg. offset ″", num: true }, { label: "reg. rms ″", num: true }, { label: "flagged %", num: true }, "Target flags"],
+    frames.map((fr) => [
+      fr.epoch_label, `${mjdDate(fr.mjd_start)} – ${mjdDate(fr.mjd_end)}`,
+      val(f(fr.mjd_mean, 2), "No mean MJD in this response"),
+      String(fr.n_exposures ?? "?"),
+      val(fr.n_exposures_dropped ?? (matched ? null : "0"), "Only reported for matched frames"),
+      val(f(fr.lam_eff_um, 3), "Not reported for this frame"),
+      val(f(fr.noise_scale, 3), "Absent with a single frame or no noise map"),
+      fr.astrometry ? `${f(fr.astrometry.dra_arcsec, 3)}, ${f(fr.astrometry.ddec_arcsec, 3)}` : unk("No Gaia registration (Gaia unreachable when built)"),
+      val(f(fr.astrometry_rms_arcsec, 3), "No Gaia registration"),
+      val(f(fr.flag_fraction != null ? fr.flag_fraction * 100 : null, 2), "Not reported"),
+      fr.target_flags?.length ? fr.target_flags.join(" ") : "none",
+    ]))));
+
+  // ---- field summary and the clicked pixel (first vs last pass) ----
+  const fm = el("div");
+  renderFieldMetrics(fm, {
+    frames: resp, spectrum, source: resp._provenance,
+    selectedPixel: pick ? { x: Math.floor(pick.x), y: Math.floor(pick.y) } : null,
+    resolved: target.pm ? { pmra: target.pm.pmra, pmdec: target.pm.pmdec, name: target.label } : null,
+  });
+  out.push(section("Field summary and selected pixel", fm));
+
+  // ---- exposures ----
+  out.push(section("Exposures",
+    loadingOr(exposures, "Open the drawer to load the exposure list.", (ex) => {
+      const det = +band.slice(1);
+      const mine = (ex.exposures || []).filter((e) => e.detector === det);
+      return el("div", {},
+        el("p", { class: "hint", text: `${mine.length} ${band} exposures (${(ex.exposures || []).length} in all bands). Exposure time and PSF FWHM per exposure: Unknown — the backend does not expose these header fields yet.` }),
+        table(["obs_id", { label: "MJD", num: true }, "Pass", { label: "λ at target µm", num: true }, { label: "flagged %", num: true }, "Target flags", "L2 file"],
+          mine.slice(0, 200).map((e) => [e.obs_id, f(e.mjd, 3), e.epoch_label || "–",
+            val(f(e.wavelength_um, 3), "Filled in once this detector's frames are built"),
+            val(f(e.flags_summary?.flag_fraction != null ? e.flags_summary.flag_fraction * 100 : null, 2), "Not reported"),
+            e.flags_summary?.target_flags ? e.flags_summary.target_flags.join(" ") || "none" : unk("Filled in once the frames are built"),
+            e.url ? el("a", { href: e.url, target: "_blank", rel: "noopener", text: "FITS" }) : unk("No URL")])));
+    })));
+
+  // ---- astrometry ----
+  out.push(section("Astrometry (SPHEREx-only proper motion)",
+    loadingOr(motion, "Open the drawer to fit the motion.", (m) => {
+      const fit = m.fit || {}, g = m.gaia;
+      return dl([
+        ["μα*", val(fit.pmra != null ? `${f(fit.pmra, 1)} ± ${f(fit.pmra_err, 1)}` : null, "No fit", " mas/yr")],
+        ["μδ", val(fit.pmdec != null ? `${f(fit.pmdec, 1)} ± ${f(fit.pmdec_err, 1)}` : null, "No fit", " mas/yr")],
+        ["Total μ", val(fit.pm_total != null ? `${f(fit.pm_total, 1)} ± ${f(fit.pm_total_err, 1)}` : null, "No fit", " mas/yr")],
+        ["Position angle", val(fit.pa_deg != null ? `${f(fit.pa_deg, 2)} ± ${f(fit.pa_err_deg, 2)}` : null, "No fit", "°")],
+        ["χ²/dof", val(f(fit.chi2_dof, 2), "No fit"), fit.n ? `${fit.n} exposures, ${fit.n_clipped ?? 0} clipped` : null],
+        ["Bootstrap errors", val(fit.bootstrap ? `${f(fit.bootstrap.pmra_err, 1)}, ${f(fit.bootstrap.pmdec_err, 1)}` : null, "No bootstrap in the response", " mas/yr")],
+        ["Parallax", val(fit.parallax != null ? `${f(fit.parallax, 2)}${fit.parallax_err != null ? ` ± ${f(fit.parallax_err, 2)}` : ""}` : null, "Not fitted", " mas"), fit.parallax_mode ? `mode: ${fit.parallax_mode}` : null],
+        ["vs Gaia DR3", g ? `${f(g.pm_sigma_diff, 2)}σ (Gaia μ = ${f(g.pm_total, 1)} mas/yr)` : unk(m.catalog ? "Compared with the catalogue PM instead" : "Target not in Gaia")],
+      ]);
+    })));
+
+  // ---- photometry ----
+  const pm = passMagnitudes(spectrum?.points);
+  out.push(section("Photometry",
+    dl([
+      ["Spectrum", spectrum?.points ? `${spectrum.points.length} points at ${f(spectrum.ra, 5)}, ${f(spectrum.dec, 5)} (${spectrum.points.filter((p) => p.flagged).length} flagged)` : unk("Click a star in the image to measure its spectrum")],
+      ["AB mag (median)", pm.unknown ? unk(pm.unknown) : f(pm.value, 2), "m_AB = 23.9 − 2.5·log₁₀(f_ν / µJy)"],
+      ["Per pass", pm.unknown ? unk(pm.unknown) : pm.per.map((p) => `${p.epoch_label} ${f(p.mag, 2)}`).join(" · ")],
+      ["Δm (last − first)", pm.unknown ? unk(pm.unknown) : val(f(pm.dm, 3), "Needs unsaturated points in two passes"), "Bandpass differs per pass: compare with matched frames"],
+    ]),
+    loadingOr(lightcurve, "Open the drawer to load the light curve.", (lc) => dl([
+      ["Light curve", `${lc.n_used}/${lc.n_points} points, ${lc.method}`],
+      ["χ²/dof (constant)", lc.chi2_constant != null ? `${f(lc.chi2_constant, 1)} / ${lc.dof}` : unk("Not computed")],
+      ["Variable?", lc.variable == null ? unk(lc.note || "No claim: unreliable photometry") : lc.variable ? "yes" : "no", lc.systematic_floor ? `floor ${f(lc.systematic_floor * 100, 1)} %, comparison rms ${f((lc.comparison_stars?.rms_scale ?? NaN) * 100, 1) ?? "?"} %` : null],
+      ["Reliable", lc.reliable === false ? `no — ${lc.note || ""}` : lc.reliable ? "yes" : unk("Not reported")],
+      ["Period", lc.period ? `${f(lc.period.period_days ?? lc.period.best_days, 1)} d` : unk("Needs ≥ 6 bins")],
+    ]))));
+
+  // ---- movers & events ----
+  out.push(section("Movers and change events",
+    loadingOr(movers, "The movers search runs when a target loads.", (mv) => el("div", {},
+      el("p", { class: "hint", text: `${mv.n_passes} passes · null test pull widths ${mv.null_test?.pull_robust_std?.map((x) => f(x, 2)).join(", ") ?? "?"} (≈1 = honest errors)` }),
+      table(["Track", "Status", { label: "μ mas/yr", num: true }, { label: "σ", num: true }, { label: "S/N min", num: true }, "Gaia"],
+        mv.tracks.filter((t) => t.status !== "stationary").map((t) => [t.id, t.status, `${f(t.pm, 0)} ± ${f(t.pm_err, 0)}`, f(t.pm_sigma, 1), f(t.snr_min, 1), t.gaia?.id || t.gaia?.source_id || (t.gaia ? "yes" : "none")])),
+      el("p", { class: "hint", text: `${mv.tracks.filter((t) => t.status === "stationary").length} stationary tracks not listed.` }))),
+    events?.length ? table(["Event", "Kind", { label: "σ", num: true }, "Conf.", "RA", "Dec", "Flags"],
+      events.map((e) => [e.id, e.kind, f(e.sigma, 1), e.confidence, f(e.ra, 5), f(e.dec, 5), e.flags.join(" ") || "–"])) : el("p", { class: "hint", text: "No change events." }),
+    el("p", { class: "formula", text: `False alarms from noise alone: ≈${f(falseAlarms(resp.wcs.width * resp.wcs.height, threshold), 4)} pixels beyond ±${threshold}σ in this ${resp.wcs.width}×${resp.wcs.height} field (Gaussian noise; stars add systematics, hence the 10 % brightness floor).` })));
+
+  // ---- coordinates ----
+  const gal = galactic(target.ra, target.dec), ecl = ecliptic(target.ra, target.dec);
+  out.push(section("Coordinates (field centre)", dl([
+    ["ICRS", `${f(target.ra, 6)}°, ${f(target.dec, 6)}°`, sexa],
+    ["Galactic", `l = ${f(gal.l, 4)}°, b = ${f(gal.b, 4)}°`],
+    ["Ecliptic (J2000)", `λ = ${f(ecl.lon, 4)}°, β = ${f(ecl.lat, 4)}°`, Math.abs(ecl.lat) > 80 ? "Near an ecliptic pole: SPHEREx revisits often" : null],
+  ])));
+
+  // ---- derived physics ----
+  const plx = motion?.fit?.parallax_mode === "fit" ? [motion.fit.parallax, motion.fit.parallax_err, "SPHEREx parallax fit"]
+    : motion?.gaia?.parallax != null ? [motion.gaia.parallax, motion.gaia.parallax_err ?? null, "Gaia DR3"] : [null, null, null];
+  const d = motion && !motion.error && motion !== "loading" ? distance(...plx) : { unknown: "Needs the astrometry fit (loading or unavailable)." };
+  const pmTot = motion?.fit?.pm_total ?? (target.pm ? Math.hypot(target.pm.pmra, target.pm.pmdec) : null);
+  const vt = tangentialVelocity(pmTot, d);
+  const H = reducedPM(pm.unknown ? null : pm.value, pmTot);
+  const T = blackbodyT(spectrum?.points);
+  const show = (r, digits, unit) => (r.unknown ? unk(r.unknown) : `${f(r.value, digits)}${unit}`);
+  out.push(section("Derived physics", dl([
+    ["Distance", d.unknown ? unk(d.unknown) : `${f(d.value, 3)} ± ${f(d.err, 3)} pc (${d.source})`, "d [pc] = 1000 / ϖ [mas], only when ϖ/σϖ > 5"],
+    ["Tangential velocity", show(vt, 1, " km/s"), "v_t = 4.74 · μ [″/yr] · d [pc]"],
+    ["Reduced proper motion", show(H, 2, ""), "H = m + 5·log₁₀ μ[″/yr] + 5 — separates nearby dwarfs from distant giants without a parallax"],
+    ["Colour temperature", T.unknown ? unk(T.unknown) : `≈${f(T.value, 0)} K (χ²/dof ${f(T.chi2_dof, 1)})`, "Rough Planck fit: brown dwarfs are not blackbodies"],
+  ])));
+
+  // ---- exports ----
+  const exp = el("div", { class: "exports" });
+  if (fitsURL) exp.append(el("a", { class: "btn", href: fitsURL, target: "_blank", rel: "noopener", text: "Frames as FITS" }));
+  else exp.append(el("span", {}, "Frames as FITS: ", unk("Needs the live backend (the offline bake has no FITS export)")));
+  if (spectrum?.points) {
+    exp.append(el("button", { type: "button", text: "Spectrum CSV", onclick: () => download("spectrum.csv", toCSV([["wavelength_um", "flux_uJy", "flux_err", "epoch", "flagged", "obs_id"], ...spectrum.points.map((p) => [p.wavelength_um, p.flux, p.flux_err, p.epoch_label, p.flagged, p.obs_id])]), "text/csv") }));
   }
-  container.append(grid);
-  container.append(element("p", "Check wavelength coverage, flags, registration, and repeat observations before interpreting a change. Reprojected neighbouring pixels are correlated; a pixel-noise ratio is not an integrated source detection. Unknown means the response did not provide a usable measurement.", "science-note"));
-  const references = element("p", "Methods and units: ", "science-note science-references");
-  for (const [index, [label, url]] of [
-    ["IRSA SPHEREx data products", "https://caltech-ipac.github.io/spherex-archive-documentation/spherex-data-products/"],
-    ["IRSA spectrophotometry", "https://irsa.ipac.caltech.edu/onlinehelp/spherex/spherex/sp.html"],
-  ].entries()) {
-    if (index) references.append(document.createTextNode(" · "));
-    const link = element("a", label);
-    link.href = url; link.target = "_blank"; link.rel = "noopener noreferrer";
-    references.append(link);
+  if (lightcurve && lightcurve.points) {
+    exp.append(el("button", { type: "button", text: "Light curve CSV", onclick: () => download("lightcurve.csv", toCSV([["mjd", "lam_um", "flux_uJy", "flux_err", "scale", "scale_err", "flagged", "used"], ...lightcurve.points.map((p) => [p.mjd, p.lam_um, p.flux, p.flux_err, p.scale, p.scale_err, p.flagged, p.used])]), "text/csv") }));
   }
-  container.append(references);
+  if (movers?.tracks) exp.append(el("button", { type: "button", text: "Tracks JSON", onclick: () => download("tracks.json", JSON.stringify(movers.tracks, null, 2), "application/json") }));
+  if (events?.length) exp.append(el("button", { type: "button", text: "Events CSV", onclick: () => download("events.csv", toCSV([["id", "kind", "ra", "dec", "sigma", "confidence", "flags"], ...events.map((e) => [e.id, e.kind, e.ra, e.dec, e.sigma, e.confidence, e.flags.join(" ")])]), "text/csv") }));
+  const cite = `This research used SPHEREx data (NASA/IPAC IRSA; doi:10.26131/IRSA678, doi:10.26131/IRSA679), Gaia DR3 (ESA; Gaia Collaboration et al. 2023, A&A 674, A1), SIMBAD (CDS) and the SPHEREx Sky Explorer (Supernova Syndicate, NASA Space Apps 2026). Release: ${resp.release || "unknown"}.`;
+  const copy = el("button", { type: "button", text: "Copy citation", onclick: async () => {
+    try { await navigator.clipboard.writeText(cite); copy.textContent = "Copied ✓"; } catch { copy.textContent = "Select the text below"; }
+  } });
+  exp.append(copy);
+  out.push(section("Exports", exp, el("pre", { text: cite })));
+
+  body.replaceChildren(...out);
 }

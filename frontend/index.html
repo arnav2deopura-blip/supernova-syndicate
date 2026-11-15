@@ -1,80 +1,257 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SPHEREx Sky Explorer · Find what changed</title>
-  <meta name="description" content="Explore the infrared sky, compare observations, and investigate stars that move or change brightness.">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SPHEREx Sky Explorer</title>
+  <meta name="description" content="Blink SPHEREx infrared sky passes to find stars that move, appear, disappear or change brightness.">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <a class="skip-link" href="#workspace">Skip to sky explorer</a>
-  <header class="site-header">
-    <a class="brand" href="./" aria-label="SPHEREx Sky Explorer home"><span class="brand-mark" aria-hidden="true">✳</span><span>SPHEREx <strong>Sky Explorer</strong></span></a>
-    <div class="header-right"><span class="project-label">SUPERNOVA SYNDICATE</span><button id="help-tour" class="quiet" type="button">Take a tour ↗</button></div>
-  </header>
-  <main id="workspace">
-    <section class="intro" aria-labelledby="intro-title">
-      <div><p class="eyebrow">THE SKY DOESN’T STAND STILL</p><h1 id="intro-title">Find what <em>changed.</em></h1><p class="intro-copy">A moving point of light. A star that flickers. Compare the infrared sky across time and follow the clues.</p></div>
-      <div class="intro-aside"><span class="orbit-icon" aria-hidden="true">◎</span><p>One patch of sky.<br>Different moments in time.<br><strong>Your next question starts here.</strong></p></div>
-    </section>
-    <section class="search-panel panel" aria-labelledby="search-title">
-      <div class="section-heading"><div><p class="eyebrow">01 / CHOOSE YOUR PATCH OF SKY</p><h2 id="search-title">Where shall we look?</h2></div><span class="helper">New here? Try one of the example targets below.</span></div>
-      <div class="search-tabs" role="tablist" aria-label="Search method">
-        <button id="tab-name" role="tab" aria-selected="true" aria-controls="panel-name" data-search="name" type="button"><span aria-hidden="true">⌕</span> Object name</button>
-        <button id="tab-space" role="tab" aria-selected="false" aria-controls="panel-space" data-search="space" tabindex="-1" type="button"><span aria-hidden="true">◎</span> Free space</button>
-        <button id="tab-coordinates" role="tab" aria-selected="false" aria-controls="panel-coordinates" data-search="coordinates" tabindex="-1" type="button"><span aria-hidden="true">＋</span> Coordinates</button>
-      </div>
-      <form id="target-form" novalidate>
-        <div id="panel-name" class="query-panel" role="tabpanel" aria-labelledby="tab-name">
-          <label for="name">Object name</label><div class="name-row"><input id="name" placeholder="Try Barnard’s Star, RW Aur, or WISE 0855" autocomplete="off" aria-describedby="name-help"><button type="submit" class="primary">Compare this object →</button></div>
-          <p id="name-help" class="helper">Search a recognised astronomical name. We’ll find its coordinates and compare the observations that are available.</p>
-        </div>
-        <div id="panel-coordinates" class="query-panel" role="tabpanel" aria-labelledby="tab-coordinates" hidden>
-          <div class="coordinate-row"><label>Right ascension (RA)<input id="ra" placeholder="269.446074 or 17:57:47.06" autocomplete="off" aria-describedby="coordinate-help"></label><label>Declination (Dec)<input id="dec" placeholder="+4.770711 or +04:46:14.56" autocomplete="off" aria-describedby="coordinate-help"></label><button type="submit" class="primary">Compare coordinates →</button></div>
-          <p id="coordinate-help" class="helper">RA is the sky’s longitude (0–360°); Dec is its latitude (−90° to +90°). Enter decimal degrees or hours:minutes:seconds for RA and degrees:minutes:seconds for Dec, in ICRS.</p>
-        </div>
-        <div id="panel-space" class="query-panel" role="tabpanel" aria-labelledby="tab-space" hidden>
-          <div class="map-heading"><p>Drag to explore · scroll or pinch to zoom · select a region to compare</p><button id="map-retry" type="button" class="quiet" hidden>Retry sky map</button></div>
-          <div class="map-shell"><div id="sky-map" aria-label="Interactive reference sky map"></div><p id="map-status" role="status">Opening the reference sky…</p></div>
-          <div class="map-actions"><button id="map-select" type="button" disabled>Select a region</button><button id="map-center" type="button" disabled>Use map centre</button><label>Comparison size<select id="map-size"><option value="0.04">0.04° · small</option><option value="0.1" selected>0.10° · standard</option><option value="0.25">0.25° · wide</option><option value="0.5">0.50° · maximum</option></select></label><span id="map-selection" class="helper" aria-live="polite">Choose a region, then compare it.</span><button id="map-compare" type="button" class="primary" disabled>Compare selected sky →</button></div>
-          <p class="helper">Reference map: DSS2 optical imagery via CDS Aladin Lite. It helps you navigate; the comparison below uses SPHEREx infrared observations. The selected rectangle is enclosed by a square cutout, up to 0.5° per side.</p>
-        </div>
-        <div class="query-options"><label>Patch size (field of view)<select id="fov"><option value="0.04">0.04° · close look</option><option value="0.1" selected>0.10° · standard</option><option value="0.25">0.25° · wider view</option><option value="0.5">0.50° · maximum</option></select></label><label>Infrared band<select id="band"><option value="D1">D1 · shortest wavelengths</option><option value="D2" selected>D2</option><option value="D3">D3</option><option value="D4">D4</option><option value="D5">D5</option><option value="D6">D6 · longest wavelengths</option></select></label><p class="helper">Each band sees a different part of infrared light. Comparisons use wavelengths shared across observation periods.</p></div>
-      </form>
-      <div class="preset-row"><span class="eyebrow">START WITH A KNOWN STORY</span><div id="presets" class="presets" aria-label="Example targets"></div></div>
-      <div id="query-error" class="message error" role="alert" hidden></div>
-    </section>
-    <div id="banner" class="message" role="status" hidden></div>
-    <div id="loading" class="loading panel" role="status" hidden><span class="spinner" aria-hidden="true"></span><div><strong id="loading-title">Finding observations…</strong><p id="loading-detail">A new region can take 1–10 minutes to prepare. Example targets have saved observations.</p><progress id="load-progress" aria-label="Preparing observations"></progress></div><button id="cancel-load" type="button">Cancel</button></div>
-    <div class="results-grid">
-      <section id="comparison" class="viewer panel" aria-labelledby="comparison-title">
-        <div class="section-heading"><div><p class="eyebrow">02 / LOOK FOR A CHANGE</p><h2 id="comparison-title">Your sky, across time</h2></div><span id="data-source" class="badge">No observations loaded</span></div>
-        <p id="target-summary" class="helper">Choose a target to begin.</p>
-        <div class="stage"><canvas id="image" width="117" height="117" tabindex="0" aria-label="Infrared comparison. Click a pixel to inspect it, or press Enter to inspect the centre."></canvas><canvas id="overlay" aria-hidden="true"></canvas><div id="viewer-empty" class="viewer-empty">Choose a patch of sky<br><span>Its observations will appear here.</span></div><span class="orientation" aria-hidden="true">N ↑<br>E ←</span></div>
-        <div id="comparison-notice" class="message compact" hidden></div>
-        <div class="player"><button id="previous-frame" type="button" aria-label="Previous observation">←</button><button id="play" type="button" class="primary">Pause</button><button id="next-frame" type="button" aria-label="Next observation">→</button><label>Speed <input id="speed" type="range" min="1" max="10" value="3" aria-describedby="speed-value"></label><output id="speed-value">3 frames/s</output><span id="frame-label">—</span></div>
-        <div class="display"><label>Comparison mode<select id="mode"><option value="blink">Blink · alternate observations</option><option value="diff">Difference · last minus first</option><option value="sum">Sum · combine observations</option></select></label><label class="checkbox-label"><input id="show-overlay" type="checkbox"> Show Gaia reference stars</label></div>
-        <p id="mode-help" class="helper mode-help">Blink: watch for a point of light that moves or changes brightness while its neighbours stay steady.</p>
-      </section>
-      <aside class="side panel" aria-labelledby="read-sky-title">
-        <p class="eyebrow">MAKE SENSE OF WHAT YOU SEE</p><h2 id="read-sky-title">Follow the clues.</h2>
-        <div class="clue"><span aria-hidden="true">↗</span><div><h3>Something moved?</h3><p>A star may jump between positions. In Difference mode, look for a bright/dark pair.</p></div></div>
-        <div class="clue"><span aria-hidden="true">◐</span><div><h3>Something flickered?</h3><p>A source may brighten or fade in place. Compare it with nearby stars before drawing a conclusion.</p></div></div>
-        <p class="science-caution">A change is a clue, not a confirmed discovery. Saturation, alignment, noise, or remaining wavelength differences can also leave a signal.</p>
-        <div class="spectrum-heading"><h3>Light across wavelengths</h3><button id="target-spectrum" type="button" class="quiet">Inspect target</button></div>
-        <p class="helper">Click the infrared image to inspect a position. A spectrum shows its brightness at different infrared wavelengths.</p>
-        <canvas id="spectrum" width="440" height="240" role="img" aria-label="Spectrum plot. A text summary appears below."></canvas>
-        <p id="spectrum-status" class="helper" role="status">No spectrum requested.</p><p id="overlay-status" class="helper" role="status"></p>
-      </aside>
+  <a class="skip-link" href="#viewer">Skip to the viewer</a>
+  <header class="top">
+    <div>
+      <h1>SPHEREx Sky Explorer</h1>
+      <p class="tagline">Find what moved, appeared or changed between SPHEREx passes of the infrared sky</p>
     </div>
-    <details id="advanced" class="advanced panel"><summary><span><span class="eyebrow">FOR A CLOSER INVESTIGATION</span><strong>Advanced analysis</strong></span><span class="summary-hint">Measurements, quality & methods <span aria-hidden="true">＋</span></span></summary>
-      <p class="helper">Inspect the measurements behind the image. Unknown means a value was not supplied or cannot be calculated reliably.</p>
-      <div class="advanced-controls"><label>Brightness stretch<select id="stretch"><option value="asinh">Asinh · reveal faint structure</option><option value="linear">Linear</option></select></label><label>Colour map<select id="cmap"><option value="gray">Grayscale</option><option value="inferno">Inferno</option><option value="viridis">Viridis</option></select></label><label>Upper display percentile<input id="clip" type="range" min="90" max="100" step="0.1" value="99.5"><output id="clip-value">99.5%</output></label></div>
-      <div id="science-details"></div>
-      <div class="table-scroll"><table id="meta"><caption>Observation periods · MJD is Modified Julian Date</caption><thead><tr><th scope="col">Period</th><th scope="col">Dates (UTC)</th><th scope="col">Exposures</th><th scope="col">Masked pixels</th><th scope="col">Target quality</th></tr></thead><tbody><tr><td colspan="5">No observations loaded.</td></tr></tbody></table></div>
+    <div class="top-actions">
+      <span id="new-data" class="badge badge-new" hidden></span>
+      <button type="button" id="guide-btn">What am I looking at?</button>
+      <button type="button" id="tour-btn" class="round" aria-label="Start the guided tour" title="Guided tour">?</button>
+    </div>
+  </header>
+
+  <div id="tour-offer" class="offer" role="region" aria-label="Tour offer" hidden>
+    <span>New here? A 1-minute tour shows how to spot a moving star.</span>
+    <button type="button" class="primary" id="tour-offer-yes">Take the tour</button>
+    <button type="button" id="tour-offer-no">No thanks</button>
+  </div>
+
+  <div id="banner" class="banner" role="status" hidden></div>
+
+  <main>
+    <section class="controls" aria-label="Choose a target">
+      <div class="search-summary" id="search-summary" hidden>
+        <span id="search-summary-text"></span>
+        <button type="button" id="search-expand">Change target</button>
+      </div>
+      <div id="search-body">
+      <div class="tabs" role="tablist" aria-label="Search mode">
+        <button type="button" role="tab" id="tab-explore" data-mode="explore" aria-controls="panel-explore">Explore the sky</button>
+        <button type="button" role="tab" id="tab-name" data-mode="name" aria-controls="panel-name">Object name</button>
+        <button type="button" role="tab" id="tab-coords" data-mode="coords" aria-controls="panel-coords">Coordinates</button>
+      </div>
+
+      <!-- Mode 1: free exploration on an all-sky map -->
+      <div class="panel" id="panel-explore" role="tabpanel" aria-labelledby="tab-explore" hidden>
+        <div class="sky-wrap" id="sky-wrap">
+          <div id="sky"></div>
+          <div class="sky-msg" id="sky-msg" hidden></div>
+        </div>
+        <div class="sky-tools">
+          <label>Background <select id="sky-bg"></select></label>
+          <label class="slice">Wavelength <span class="slice-row"><input id="sky-slice" type="range" min="1" max="101" value="25"> <output id="sky-slice-label">–</output></span></label>
+          <button type="button" id="sky-draw" aria-pressed="false">Draw box</button>
+          <button type="button" id="sky-view">Use current view</button>
+        </div>
+        <p class="hint">Drag to pan, scroll or pinch to zoom. <b>Click</b> to drop a box of the chosen field of view, or <b>Shift+drag</b> (or “Draw box”, then drag) to draw one, up to 0.5°. Orange circles are the test targets.</p>
+        <div class="selection" id="sky-selection">
+          <div><span class="k">Cursor</span> <span id="sky-cursor">–</span></div>
+          <div><span class="k">Selection</span> <span id="sky-sel">none yet</span></div>
+          <div><span class="k">Coverage</span> <span id="sky-cov">–</span></div>
+          <button type="button" id="sky-compare" class="primary" disabled>Compare this region</button>
+        </div>
+      </div>
+
+      <!-- Mode 2: object name -->
+      <form class="panel" id="panel-name" role="tabpanel" aria-labelledby="tab-name" hidden>
+        <div class="row">
+          <label class="grow">Object name
+            <input id="name" list="name-suggest" placeholder="Barnard's Star, RW Aur, M42, HD 189733…" autocomplete="off" required>
+          </label>
+          <datalist id="name-suggest"></datalist>
+          <button type="submit" class="primary">Search &amp; compare</button>
+        </div>
+        <div class="result" id="name-result" hidden></div>
+        <div class="presets" id="presets" aria-label="Test targets"><span class="k">Try one:</span></div>
+      </form>
+
+      <!-- Mode 3: coordinates -->
+      <form class="panel" id="panel-coords" role="tabpanel" aria-labelledby="tab-coords" hidden novalidate>
+        <div class="row">
+          <label><span>RA <button type="button" class="info" data-term="radec"></button></span><input id="ra" placeholder="269.4461 or 17:57:47.1" autocomplete="off" inputmode="decimal"></label>
+          <label>Dec <input id="dec" placeholder="4.7707 or +04:46:14" autocomplete="off" inputmode="decimal"></label>
+          <button type="submit" class="primary">Compare</button>
+        </div>
+        <p class="hint">ICRS. Decimal degrees, or sexagesimal (RA in hours: <code>17:57:47</code> / <code>17h57m47s</code>). You can also paste both into the RA box: <code>269.446 4.771</code>.</p>
+        <p class="echo" id="coord-echo" aria-live="polite"></p>
+      </form>
+      </div>
+
+      <!-- Shared by all modes -->
+      <div class="shared" id="shared">
+        <label><span>Field of view <button type="button" class="info" data-term="fov"></button></span>
+          <select id="fov">
+            <option value="0.04">0.04°</option>
+            <option value="0.1" selected>0.1°</option>
+            <option value="0.25">0.25°</option>
+            <option value="0.5">0.5°</option>
+          </select>
+        </label>
+        <label><span>Colour band <button type="button" class="info" data-term="band"></button></span>
+          <select id="band">
+            <option value="D1">D1 · 0.75–1.1 µm</option><option value="D2" selected>D2 · 1.1–1.6 µm</option>
+            <option value="D3">D3 · 1.6–2.4 µm</option><option value="D4">D4 · 2.4–3.8 µm</option>
+            <option value="D5">D5 · 3.8–4.4 µm</option><option value="D6">D6 · 4.4–5.0 µm</option>
+          </select>
+        </label>
+        <label class="check" title="Matched wavelengths: use only the spectral channels seen in every pass"><input id="matched" type="checkbox" checked> Fair brightness comparison <button type="button" class="info" data-term="matched"></button></label>
+        <div class="wl" id="wl">
+          <span class="k">Wavelengths <button type="button" class="info" data-term="channel"></button></span>
+          <div class="seg" role="radiogroup" aria-label="Wavelengths to use">
+            <button type="button" role="radio" data-wl="detector" aria-checked="true">Whole band (clearest)</button>
+            <button type="button" role="radio" data-wl="range" aria-checked="false">Pick channels</button>
+          </div>
+        </div>
+      </div>
+      <div class="range-box" id="range-box" hidden>
+        <div class="range-row">
+          <label>From channel <input id="ch-lo" type="range" min="1" max="17" value="7"></label>
+          <label>to <input id="ch-hi" type="range" min="1" max="17" value="11"></label>
+          <output id="ch-label">–</output>
+          <button type="button" id="ch-apply" class="primary">Show these channels</button>
+        </div>
+        <p class="hint">Fewer channels = fewer exposures = noisier. Channels stay inside one detector, so the picture never mixes two instruments.</p>
+        <div class="molecules" id="molecules"><span class="k">Molecules:</span></div>
+      </div>
+
+      <div class="progress" id="progress" hidden>
+        <progress id="progress-bar"></progress>
+        <span id="progress-text">Working…</span>
+        <button type="button" id="progress-cancel">Cancel</button>
+      </div>
+    </section>
+
+    <section class="viewer" id="viewer" aria-label="Viewer" tabindex="-1">
+      <div class="viewer-head">
+        <h2 id="target-label">No target yet</h2>
+        <span class="badges" id="badges"></span>
+        <button type="button" id="show-on-sky" class="link" hidden>Show on sky map</button>
+      </div>
+
+      <div class="seg views" role="radiogroup" aria-label="What to show" id="views">
+        <button type="button" role="radio" data-view="blink" aria-checked="true" title="Blink: play the passes as a movie">Play passes</button>
+        <button type="button" role="radio" data-view="diff" aria-checked="false">Difference</button>
+        <button type="button" role="radio" data-view="changes" aria-checked="false">Changes (σ)</button>
+        <button type="button" role="radio" data-view="sum" aria-checked="false" title="All passes added: faintest things">Sum</button>
+        <button type="button" role="radio" data-view="colours" aria-checked="false" title="Play through the channels of this band instead of through time">Colours</button>
+        <button type="button" class="info" data-term="diff"></button>
+      </div>
+
+      <div class="ab" id="ab" hidden>
+        <label>Pass A <select id="pass-a"></select></label>
+        <span aria-hidden="true">→</span>
+        <label>Pass B <select id="pass-b"></select></label>
+        <span class="k" id="ab-hint"></span>
+        <label title="How big a brightness change on a star counts. Careful: changes must exceed 10 % of the star's brightness as well as 5σ. Sensitive: 5 % (more real variables, more false alarms).">Sensitivity
+          <select id="sensitivity"><option value="0.1">Careful</option><option value="0.05">Sensitive</option></select>
+        </label>
+      </div>
+
+      <div id="viewer-notice" class="notice" hidden></div>
+
+      <div class="stage" id="stage">
+        <div class="stage-inner" id="stage-inner">
+          <canvas id="image" width="48" height="48" aria-label="SPHEREx image. Click a star to measure its spectrum."></canvas>
+          <canvas id="overlay" aria-hidden="true"></canvas>
+        </div>
+        <div class="stage-empty" id="stage-empty"><p>Pick a target above, or try <button type="button" class="link" id="empty-preset">Barnard's Star</button>.</p></div>
+      </div>
+
+      <div class="legend" id="legend" hidden>
+        <span><i class="sym sym-ring"></i>brighter / new</span>
+        <span><i class="sym sym-x"></i>fainter / gone</span>
+        <span><i class="sym sym-arrow"></i>moved</span>
+        <span><i class="sym sym-half"></i>variable</span>
+        <span><i class="sym sym-dash"></i>dashed = uncertain <button type="button" class="info" data-term="confidence"></button></span>
+        <span class="scale" id="sigma-scale" hidden><b class="bar"></b><span>−5σ</span><span>0</span><span>+5σ</span></span>
+      </div>
+
+      <div class="player">
+        <button type="button" id="prev" aria-label="Previous frame" title="Previous (←)">◀</button>
+        <button type="button" id="play" class="play" title="Play / pause (space)">Pause</button>
+        <button type="button" id="next" aria-label="Next frame" title="Next (→)">▶</button>
+        <label class="speed">Speed <input id="speed" type="range" min="1" max="10" value="3"></label>
+        <span id="frame-label" aria-live="polite">–</span>
+      </div>
+      <div class="timeline" id="timeline" aria-label="Passes on a time axis"></div>
+      <div class="filmstrip" id="filmstrip" hidden></div>
+
+      <div class="toggles">
+        <label class="check"><input id="show-overlay" type="checkbox" checked> Gaia stars <button type="button" class="info" data-term="gaia"></button></label>
+        <label class="check"><input id="show-events" type="checkbox" checked> Change markers</label>
+        <label>Zoom
+          <select id="zoom"><option value="1">1×</option><option value="2">2×</option><option value="3">3×</option><option value="4">4×</option></select>
+        </label>
+        <button type="button" id="save-png">Save image</button>
+        <button type="button" id="save-movie">Save movie</button>
+      </div>
+      <details class="display-opts" id="display-opts">
+        <summary>Display options</summary>
+        <div class="row">
+          <label><span>Contrast <button type="button" class="info" data-term="contrast"></button></span>
+            <select id="stretch">
+              <option value="asinh">Show faint things (asinh)</option>
+              <option value="linear">Linear</option>
+            </select>
+          </label>
+          <label>Colours
+            <select id="cmap">
+              <option value="gray">Grey</option>
+              <option value="inferno">Inferno</option>
+              <option value="viridis">Viridis</option>
+            </select>
+          </label>
+          <label><span>Brightness cap <button type="button" class="info" data-term="cap"></button></span> <input id="clip" type="range" min="90" max="100" step="0.1" value="99.5"></label>
+        </div>
+      </details>
+    </section>
+
+    <aside class="side">
+      <div id="events-panel">
+      <div class="events-head">
+        <h2>Events <button type="button" class="info" data-term="changes"></button></h2>
+        <label class="check small"><input id="show-low" type="checkbox"> <span>show uncertain (<span id="low-count">0</span>)</span></label>
+      </div>
+      <p class="hint" id="events-summary">Events appear once a target has two or more passes.</p>
+      <ol class="events" id="events"></ol>
+      <div class="event-detail" id="event-detail" hidden></div>
+      </div>
+
+      <h2>Spectrum <small>(click the image)</small></h2>
+      <canvas id="spectrum" width="360" height="200"></canvas>
+    </aside>
+
+    <details class="advanced" id="advanced">
+      <summary>Advanced: passes, exposures, astrometry, photometry, derived physics, exports</summary>
+      <div id="adv-body" class="adv-body"><p class="hint">Load a target first.</p></div>
     </details>
   </main>
-  <footer><div class="brand footer-brand"><span class="brand-mark" aria-hidden="true">✳</span><span>Small changes. <strong>New questions.</strong></span></div><p>SPHEREx · NASA/IPAC IRSA · Gaia DR3 · ESA<br>Supernova Syndicate / NASA Space Apps Challenge 2026</p><a href="https://irsa.ipac.caltech.edu/Missions/spherex.html" target="_blank" rel="noopener noreferrer">About the data ↗</a></footer>
+
+  <dialog id="guide" class="guide" aria-labelledby="guide-title">
+    <div class="guide-head">
+      <h2 id="guide-title">What am I looking at?</h2>
+      <button type="button" class="round" id="guide-close" aria-label="Close">✕</button>
+    </div>
+    <p class="hint">Volunteers learn faster from examples of real and fake changes than from rules. Each card loads a real example from the five test targets.</p>
+    <div class="guide-cards" id="guide-cards"></div>
+  </dialog>
+
+  <footer>
+    Data: SPHEREx (NASA/IPAC IRSA), Gaia DR3 (ESA); sky map: Aladin Lite (CDS). <span id="data-span"></span>
+    Built for NASA Space Apps 2026 by Supernova Syndicate.
+  </footer>
+
   <script type="module" src="js/app.js"></script>
 </body>
 </html>
