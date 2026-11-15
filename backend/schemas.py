@@ -46,6 +46,12 @@ class Frame(BaseModel):
         description="Flat row-major array (row 0 = top, null = masked) or a URL to one"
     )
     flag_fraction: float
+    # Additive (phase 1); optional so mocks without them stay valid.
+    mjd_mean: Optional[float] = Field(None, description="Mean MJD of the exposures in this frame")
+    lam_um: Optional[list[float]] = Field(None, description="Wavelength at the target in each exposure, um")
+    lam_eff_um: Optional[float] = Field(None, description="Mean of lam_um")
+    target_flags: Optional[list[str]] = Field(None, description="Flag names touching the target in any exposure")
+    obs_ids: Optional[list[str]] = None
 
 
 class FramesResponse(BaseModel):
@@ -55,17 +61,20 @@ class FramesResponse(BaseModel):
     band: Band
     wcs: WCSInfo
     frames: list[Frame]
+    units: str = "MJy/sr"
+    release: Optional[str] = None
 
 
 class FlagsSummary(BaseModel):
     flag_fraction: float
+    target_flags: Optional[list[str]] = None
 
 
 class Exposure(BaseModel):
     obs_id: str
     mjd: float
     detector: int = Field(ge=1, le=6)
-    wavelength_um: float
+    wavelength_um: Optional[float] = Field(None, description="At the target; null until the band is processed")
     epoch_label: str
     flags_summary: FlagsSummary
     url: str
@@ -93,6 +102,7 @@ class EpochPosition(BaseModel):
     epoch_label: str
     ra: float
     dec: float
+    mjd: Optional[float] = Field(None, description="Time the position was propagated to (epoch mean MJD)")
 
 
 class OverlaySource(BaseModel):
@@ -102,9 +112,24 @@ class OverlaySource(BaseModel):
     pmra: Optional[float] = None
     pmdec: Optional[float] = None
     mag: Optional[float] = None
+    ref_epoch: Optional[float] = Field(None, description="Decimal year of ra/dec (Gaia DR3: 2016.0)")
     positions_by_epoch: list[EpochPosition]
 
 
 class OverlayResponse(BaseModel):
     catalog: str
     sources: list[OverlaySource]
+
+
+class JobStatus(BaseModel):
+    job_id: str
+    state: Literal["queued", "running", "done", "error"]
+    stage: str = ""
+    message: str = ""
+    done: int = 0
+    total: int = 0
+    error: Optional[ErrorCode] = None
+    created: float
+    finished: Optional[float] = None
+    result: Optional[dict] = None
+    status_url: Optional[str] = None

@@ -12,7 +12,8 @@ Base URL: set in `frontend/js/api.js` (`API_BASE`). All responses are JSON.
 | Coordinates | ICRS degrees (`ra` 0–360, `dec` −90–90) |
 | Proper motion | mas/yr (`pmra` includes the cos δ factor) |
 | Wavelength | µm |
-| Flux | µJy **[confirm from SPHEREx headers]** |
+| Image pixels (`/frames`) | **MJy/sr** surface brightness (SPHEREx `BUNIT`), zodi and local background removed |
+| Flux (`/spectrum`) | µJy |
 | Time | MJD (float) |
 | Field of view `fov` | degrees, square cutout side. Default 0.1, max 0.5 |
 | Band `band` | `D1` … `D6` (detector). Edges in `backend/config.yaml` |
@@ -85,9 +86,36 @@ One co-added frame per epoch for one detector band, all on the same grid.
 
 `data` is either the flat float array or a string URL to a `.json`/`.bin` file with the same array (used by `frontend/precomputed/` for large cutouts). For `.bin`: little-endian float32, NaN for masked.
 
+**Live backend (phase 1):** `data` is always an absolute URL to `GET /api/blob/<id>.bin` (content-addressed, cacheable forever, gzip on the wire). Optional fields added to every frame and the response (all additive, mocks stay valid):
+
+| Field | Meaning |
+|---|---|
+| `units` (response) | `"MJy/sr"` |
+| `release` (response) | Data release tag the frames were built from, e.g. `dr1+qr3-2026W40` |
+| `mjd_mean` | Mean MJD of the frame's exposures. Propagate overlays to this, not to the label |
+| `lam_um` | Wavelength (µm) at the target in each exposure. A SPHEREx detector sees a different wavelength at every position, so a frame's colour mix is listed here |
+| `lam_eff_um` | Mean of `lam_um` |
+| `target_flags` | Flag names touching the target in any exposure (e.g. `OVERFLOW` = saturated). Show as a warning, not an error |
+| `obs_ids` | Exposure IDs in the frame |
+
+**Slow first requests (phase 2).** A position nobody has asked for before needs an archive search plus downloads: ~1–10 min. Cached positions answer in well under a second. Two ways to call:
+
+- `GET /api/frames?...` (default) waits for the result. Simple, but a browser may time out.
+- `GET /api/frames?...&async=1` returns at once: **200** with frames if cached, otherwise **202** with a job:
+
+```json
+{ "job_id": "3f9c0a1b2c3d4e5f", "state": "running", "stage": "stamps", "message": "Downloading image cutouts",
+  "done": 12, "total": 46, "error": null, "created": 1794680000.1, "finished": null, "result": null,
+  "status_url": "http://host/api/jobs/3f9c0a1b2c3d4e5f" }
+```
+
+Poll `GET /api/jobs/{job_id}` (every ~1 s) until `state` is `done` (then `result.result_url` is the frames URL, now cached) or `error` (`error` is an error code from the table above, `message` explains). `stage`/`done`/`total` drive a progress bar.
+
+**Epoch labels are per position, shared by all bands and the overlay.** `E2` means the same months in D1 and D6. A band with no data in a pass skips that label (e.g. `E1, E3`). A pass longer than 90 days (near the ecliptic poles coverage is nearly continuous) is split at its largest gap, or into equal ≤90-day bins, so polar targets get more frames.
+
 ## `GET /api/exposures?ra=&dec=&fov=`
 
-Every individual exposure covering the position (for the metadata panel).
+Every individual exposure covering the position, all six detectors (for the metadata panel). `wavelength_um` and `flags_summary.target_flags` are `null` until that detector's frames have been built once (they come from the image cutout). `url` is the full level-2 file (S3 or IRSA).
 
 ```json
 {
@@ -121,7 +149,7 @@ Quick-look aperture photometry at one position, every exposure, tagged by epoch.
 
 ## `GET /api/overlay?ra=&dec=&fov=&cat=gaia`
 
-Catalogue sources in the field, with positions propagated to each epoch.
+Gaia DR3 sources in the field (G < 18, plus every source with proper motion > 100 mas/yr at any magnitude), with positions propagated from J2016.0 (`ref_epoch`) to each epoch's mean exposure time (`positions_by_epoch[].mjd`). Draw `positions_by_epoch`, not `ra`/`dec`. Not in Gaia: very red faint objects such as WISE 0855 (CatWISE planned).
 
 ```json
 {

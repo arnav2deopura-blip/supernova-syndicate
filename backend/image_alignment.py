@@ -5,7 +5,9 @@ oversampled grid (~3"/px) and let the browser upscale.
 """
 from __future__ import annotations
 
+import numpy as np
 from astropy.wcs import WCS
+from reproject import reproject_interp
 
 
 def target_wcs(ra: float, dec: float, fov_deg: float, pixel_scale_arcsec: float) -> WCS:
@@ -20,6 +22,18 @@ def target_wcs(ra: float, dec: float, fov_deg: float, pixel_scale_arcsec: float)
     return w
 
 
-def reproject_to(image, image_wcs: WCS, out_wcs: WCS):
-    """Issue #7: reproject one cutout onto out_wcs (use reproject.reproject_interp)."""
-    raise NotImplementedError("Issue #7: reprojection to common grid")
+def reproject_to(image: np.ndarray, image_wcs: WCS, out_wcs: WCS) -> np.ndarray:
+    """Bilinear reprojection of a surface-brightness image (MJy/sr) onto out_wcs.
+
+    Surface brightness is preserved (no flux rescaling): a source's summed pixel values change
+    with pixel area, so photometry must use the *output* pixel solid angle. Pixels outside the
+    input footprint, or next to NaN input pixels, come back NaN.
+    """
+    shape = (out_wcs.pixel_shape[1], out_wcs.pixel_shape[0])
+    out = reproject_interp((image, image_wcs), out_wcs, shape_out=shape, order="bilinear", return_footprint=False)
+    return out.astype(np.float32)
+
+
+def to_display_rows(arr: np.ndarray) -> np.ndarray:
+    """FITS row 0 is south; the API wants row 0 = top = north."""
+    return np.ascontiguousarray(arr[::-1])
