@@ -3,10 +3,61 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import tempfile
+import threading
+import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Optional
 
 from .config import get_config
+
+
+_stripes = [threading.RLock() for _ in range(128)]
+_pins_guard = threading.RLock()
+_pins = {}
+
+@contextmanager
+def key_lock(key):
+    # Bounded lock table; reentrant for nested product/download operations.
+    lock = _stripes[int(hashlib.sha256(str(key).encode()).hexdigest()[:8], 16) % len(_stripes)]
+    with lock:
+        yield
+
+def atomic_write(path, data):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(prefix=path.stem + '.', suffix='.tmp', dir=path.parent)
+    try:
+        with os.fdopen(fd, 'wb') as f:
+            f.write(data); f.flush(); os.fsync(f.fileno())
+        os.replace(name, path)
+    finally:
+        Path(name).unlink(missing_ok=True)
+
+def atomic_fits(path, hdul):
+    import io
+    buffer = io.BytesIO()
+    hdul.writeto(buffer)
+    atomic_write(path, buffer.getvalue())
+
+def lease(paths, seconds=900):
+    with _pins_guard:
+        now=time.time()
+        for key in list(_pins):
+            if _pins[key] < now: del _pins[key]
+        until = now + seconds
+        for path in paths:
+            _pins[str(Path(path).resolve())] = until
+
+
+def retain(paths, seconds=900):
+    """Atomically verify dependencies and lease them against pruning."""
+    with _pins_guard:
+        if not all(Path(p).exists() for p in paths): return False
+        lease(paths,seconds)
+        return True
 
 
 def cache_key(kind: str, ra: float, dec: float, fov: float, band: str = "", release: str = "") -> str:
@@ -22,15 +73,17 @@ def _path(key: str, suffix: str, root: Optional[Path] = None) -> Path:
 
 def get_json(key: str, root: Optional[Path] = None) -> Optional[Any]:
     p = _path(key, ".json", root)
-    return json.loads(p.read_text()) if p.exists() else None
+    try:
+        value = json.loads(p.read_text())
+        os.utime(p, None)
+        return value
+    except (OSError, ValueError):
+        return None
 
 
 def put_json(key: str, value: Any, root: Optional[Path] = None) -> None:
     p = _path(key, ".json", root)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(value))
-    tmp.replace(p)  # atomic, so a crash never leaves half a file
+    atomic_write(p, json.dumps(value, allow_nan=False).encode())
 
 
 def file_path(key: str, suffix: str = ".fits", root: Optional[Path] = None) -> Path:
@@ -55,9 +108,27 @@ def prune(max_mb: Optional[float] = None, root: Optional[Path] = None, keep_frac
         return 0
     files = []
     total = 0
+    protected = set()
+    now = time.time()
+    with _pins_guard:
+        for key in list(_pins):
+            if _pins[key] < now: del _pins[key]
+        protected.update(_pins)
+    def referenced(node):
+        if isinstance(node, dict):
+            for k,v in node.items():
+                if k in ('blob','noise_blob','coverage_blob') and isinstance(v,str):
+                    protected.add(str((root/'blobs'/f'{v}.bin').resolve()))
+                else: referenced(v)
+        elif isinstance(node,list):
+            for v in node: referenced(v)
+    for meta in root.rglob('*.json'):
+        try: referenced(json.loads(meta.read_text()))
+        except (OSError,ValueError): pass
     for p in root.rglob("*"):
         if p.is_file():
-            st = p.stat()
+            try: st = p.stat()
+            except OSError: continue
             files.append((st.st_mtime, st.st_size, p))
             total += st.st_size
     limit = max_mb * 1024 * 1024
@@ -67,10 +138,14 @@ def prune(max_mb: Optional[float] = None, root: Optional[Path] = None, keep_frac
     for _, size, p in sorted(files):
         if total <= keep_fraction * limit:
             break
-        try:
-            p.unlink()
-            total -= size
-            removed += 1
-        except OSError:
-            pass
+        if str(p.resolve()) in protected or p.suffix == '.tmp':
+            continue
+        with _pins_guard:
+            if _pins.get(str(p.resolve()),0) > time.time(): continue
+            try:
+                p.unlink()
+                total -= size
+                removed += 1
+            except OSError:
+                pass
     return removed

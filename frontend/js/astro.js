@@ -27,26 +27,27 @@ export function ecliptic(ra, dec) {
 
 /** d [pc] = 1000 / ϖ [mas], only when ϖ/σϖ > 5. */
 export function distance(plx, plxErr, source) {
-  if (plx == null) return { unknown: "No parallax for this source (not in Gaia, or not fitted)." };
-  if (plxErr == null) return { unknown: `Parallax ϖ = ${plx.toFixed(2)} mas (${source}) but its error isn't reported, so the ϖ/σϖ > 5 reliability check can't be made.` };
+  if (!Number.isFinite(plx) || plx <= 0) return { unknown: "No parallax for this source (not in Gaia, or not fitted)." };
+  if (!Number.isFinite(plxErr) || plxErr <= 0) return { unknown: `Parallax ϖ = ${plx.toFixed(2)} mas (${source}) but its error isn't reported, so the ϖ/σϖ > 5 reliability check can't be made.` };
   if (plx / plxErr <= 5) return { unknown: `ϖ/σϖ = ${(plx / plxErr).toFixed(1)} ≤ 5: too uncertain for a distance.` };
   return { value: 1000 / plx, err: (1000 / plx) * (plxErr / plx), source };
 }
 
 /** v_t [km/s] = 4.74 · μ [″/yr] · d [pc]. */
 export function tangentialVelocity(pmMasYr, dist) {
-  if (pmMasYr == null) return { unknown: "No proper motion measured." };
+  if (!Number.isFinite(pmMasYr) || pmMasYr < 0) return { unknown: "No proper motion measured." };
+  if (!dist || (!dist.unknown && (!Number.isFinite(dist.value) || dist.value <= 0))) return {unknown:"A valid positive distance is required."};
   if (dist.unknown) return { unknown: `Needs a distance: ${dist.unknown}` };
   return { value: 4.74 * (pmMasYr / 1000) * dist.value };
 }
 
 /** m_AB = 23.9 − 2.5 log10(f / µJy). */
-export const abMag = (fluxUJy) => (fluxUJy > 0 ? 23.9 - 2.5 * Math.log10(fluxUJy) : null);
+export const abMag = (fluxUJy) => (Number.isFinite(fluxUJy) && fluxUJy > 0 ? 23.9 - 2.5 * Math.log10(fluxUJy) : null);
 
 /** H = m + 5 log10 μ[″/yr] + 5. */
 export function reducedPM(mag, pmMasYr) {
-  if (mag == null) return { unknown: "No magnitude (no unsaturated spectrum points)." };
-  if (!(pmMasYr > 0)) return { unknown: "No proper motion measured." };
+  if (!Number.isFinite(mag)) return { unknown: "No magnitude (no unsaturated spectrum points)." };
+  if (!Number.isFinite(pmMasYr) || !(pmMasYr > 0)) return { unknown: "No proper motion measured." };
   return { value: mag + 5 * Math.log10(pmMasYr / 1000) + 5 };
 }
 
@@ -54,38 +55,20 @@ const median = (a) => { const s = [...a].sort((x, y) => x - y); const n = s.leng
 
 /** Per-pass AB magnitude from the spectrum's unflagged points (median flux), and Δm between first and last pass. */
 export function passMagnitudes(points) {
-  const good = (points || []).filter((p) => !p.flagged && p.flux > 0);
-  if (!good.length) return { unknown: points?.length ? "Every spectrum point is flagged (saturated): no reliable magnitude." : "Click the target to measure its spectrum first." };
-  const labels = [...new Set(good.map((p) => p.epoch_label))].sort((a, b) => +a.slice(1) - +b.slice(1));
-  const per = labels.map((l) => {
-    const f = median(good.filter((p) => p.epoch_label === l).map((p) => p.flux));
-    return { epoch_label: l, flux: f, mag: abMag(f) };
-  });
-  const all = abMag(median(good.map((p) => p.flux)));
-  return { value: all, per, dm: per.length > 1 ? per.at(-1).mag - per[0].mag : null };
+  // Arbitrary spectral samples are not a defined photometric bandpass.
+  const good=(points || []).filter(p=>p.flagged===false && Number.isFinite(p.flux) && p.flux>0 && Number.isFinite(p.flux_err) && p.flux_err>0 && p.channel);
+  if (!good.length) return {unknown:'No unflagged, positive flux with a valid uncertainty and channel.'};
+  const labels=[...new Set(good.map(p=>p.epoch_label))].sort((a,b)=>+a.slice(1)-+b.slice(1));
+  const perChannels=labels.map(l=>new Set(good.filter(p=>p.epoch_label===l).map(p=>p.channel)));
+  const shared=[...perChannels[0]].filter(c=>perChannels.every(s=>s.has(c)));
+  if (shared.length !== 1) return {unknown:'A single shared spectral channel is required; mixed-wavelength spectra are not broadband magnitudes.'};
+  const per=labels.map(l=>({epoch_label:l,flux:median(good.filter(p=>p.epoch_label===l && p.channel===shared[0]).map(p=>p.flux))})).map(p=>({...p,mag:abMag(p.flux)}));
+  return {value:median(per.map(p=>p.mag)),per,dm:per.length>1?per.at(-1).mag-per[0].mag:null,channel:shared[0]};
 }
 
 /** Rough colour temperature: Planck fit (free scale) to the spectrum, grid in log T. */
 export function blackbodyT(points) {
-  const good = (points || []).filter((p) => !p.flagged && p.flux > 0 && p.wavelength_um > 0);
-  if (good.length < 5) return { unknown: "Needs at least 5 unsaturated spectrum points." };
-  const lams = good.map((p) => p.wavelength_um);
-  const span = Math.max(...lams) - Math.min(...lams);
-  if (span < 0.5) return { unknown: `The spectrum spans only ${span.toFixed(2)} µm: too narrow to fit a temperature. Use a spectrum over all detectors.` };
-  const hck = 14387.77;   // hc/k in µm·K
-  const fnu = (lam, T) => 1 / (lam ** 3 * (Math.exp(hck / (lam * T)) - 1));   // ∝ B_ν (ν³ / (e^{hν/kT} − 1))
-  let best = null;
-  for (let lt = Math.log10(300); lt <= Math.log10(30000); lt += 0.005) {
-    const T = 10 ** lt;
-    let sxy = 0, sxx = 0;
-    const w = good.map((p) => 1 / Math.max(p.flux_err || p.flux * 0.05, 1e-9) ** 2);
-    good.forEach((p, i) => { const m = fnu(p.wavelength_um, T); sxy += w[i] * m * p.flux; sxx += w[i] * m * m; });
-    const a = sxy / sxx;
-    let chi = 0;
-    good.forEach((p, i) => { chi += w[i] * (p.flux - a * fnu(p.wavelength_um, T)) ** 2; });
-    if (!best || chi < best.chi) best = { T, chi };
-  }
-  return { value: best.T, chi2_dof: best.chi / (good.length - 2), n: good.length };
+  return {unknown:'Temperature estimation is withheld until the spectral model, uncertainties and epoch matching are validated.'};
 }
 
 /** Standard normal upper tail, for the false-alarm estimate. */

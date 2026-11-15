@@ -6,7 +6,7 @@
 // The viewer: Play passes (blink), Difference and Changes (σ) between any two passes A/B, Sum, and Colours
 // (the 17 channels of a band). Changes are circled automatically (js/changes.js) and listed as Events.
 // URL: ?mode=&ra=&dec=&fov=&band=&matched=&name=&view=&a=&b=&ch=lo-hi&tour=1&embed=1
-import { api, setFallbackHandler, apiLabel, API_BASE, DEPLOYED_API } from "./api.js";
+import { api, setFallbackHandler, apiLabel, API_BASE, DEPLOYED_API, strictFresh } from "./api.js";
 import { parseCoord } from "./coordinates.js";
 import { Player } from "./player.js";
 import { draw, sumFrames } from "./render.js";
@@ -32,7 +32,7 @@ const PRESETS = [
   { slug: "r-dra", label: "R Dra", name: "R Dra", ra: 248.1672204, dec: 66.7550253, band: "D2", aliases: ["r draconis"] },
 ];
 const MODES = ["explore", "name", "coords"];
-const VIEWS = ["blink", "diff", "changes", "sum", "colours"];
+const VIEWS = ["blink", "smooth", "pair", "diff", "changes", "sum", "colours"];
 const RECENT_KEY = "sse.recentNames";
 const ADV_KEY = "sse.advancedOpen";
 const SEEN_KEY = "sse.lastDataThrough";
@@ -166,6 +166,15 @@ function setFov(side) {
   ui.fov.value = opt.value;
 }
 
+$("live-only").checked = strictFresh();
+$("live-only").addEventListener("change",()=>{
+  const url=new URL(location.href);
+  if($("live-only").checked) url.searchParams.set('fresh','1');else url.searchParams.delete('fresh');
+  history.replaceState(null,'',url);
+  if(state.target?.name) searchName(state.target.name,{band:ui.band.value});
+  else if(state.target) loadTarget(state.target);
+});
+
 // ---- progress for long backend jobs ----
 const STAGE_TEXT = {
   search: "Searching the archive", query: "Searching the archive", headers: "Reading image headers",
@@ -196,12 +205,13 @@ function setView(view, { silent = false } = {}) {
   if (!VIEWS.includes(view)) view = "blink";
   state.view = view;
   for (const b of ui.views) b.setAttribute("aria-checked", String(b.dataset.view === view));
-  ui.ab.hidden = !(view === "diff" || view === "changes") || passFrames().length < 2;
+  ui.ab.hidden = !(view === "diff" || view === "changes" || view === "pair") || passFrames().length < 2;
   ui.filmstrip.hidden = view !== "colours";
   if (view === "colours") loadColours();
-  else player.load(passFrames().length, view === "blink" ? state.index : null);
+  else player.load(passFrames().length, ["blink", "smooth"].includes(view) ? state.index : null, ["blink","smooth"].includes(view));
   updatePlayerUI();
   updateNotice();
+  renderBadges();
   render();
   if (!silent) writeURL();
 }
@@ -332,6 +342,7 @@ function applyZoom() {
   const clamp = (v) => Math.min(1 - 0.5 / z, Math.max(0.5 / z, v));
   const cx = z > 1 ? clamp(state.zoomAt.x) : 0.5, cy = z > 1 ? clamp(state.zoomAt.y) : 0.5;
   ui.stageInner.style.transform = z > 1 ? `scale(${z}) translate(${(0.5 - cx) * 100}%, ${(0.5 - cy) * 100}%)` : "";
+  for (const inner of document.querySelectorAll('.pair-inner')) inner.style.transform=ui.stageInner.style.transform;
   ui.zoom.value = String(z);
 }
 function zoomTo(p, z) {
@@ -360,11 +371,14 @@ function updateNotice() {
     if (state.cube?.error) { showNotice(ui.notice, state.cube.error); return; }
     clearNotice(ui.notice); return;
   }
+  if (state.frames.completeness?.failed) {
+    showNotice(ui.notice,{tone:"warn",title:`Partial result: ${state.frames.completeness.failed} input downloads failed.`,why:"Successful observations are displayed. Retry the missing inputs before interpreting changes.",actions:[{label:"Retry missing downloads",primary:true,onClick:()=>loadTarget({...state.target,retryMissing:true})}]});return;
+  }
   const rg = state.frames.range;
   if (fr.length < 2 && rg) {
     const sg = rg.suggest;
     showNotice(ui.notice, {
-      tone: "empty", title: `Only ${fr.length ? `pass ${fr[0].epoch_label}` : "no pass"} has data in all of channels ${rg.lo}–${rg.hi} here.`,
+      tone: "empty", title: `${fr.length ? `Only pass ${fr[0].epoch_label}` : "No pass"} has data in all of channels ${rg.lo}–${rg.hi} here.`,
       why: `SPHEREx sees a different set of channels at this spot in each pass (${state.base.frames.length} passes in the whole band). A fair comparison needs the same channels in every pass.${sg ? ` Channels ${sg.lo}–${sg.hi} are covered by ${sg.passes.join(", ")}.` : ""}`,
       actions: [
         ...(sg ? [{ label: `Try channels ${sg.lo}–${sg.hi}`, primary: true, onClick: () => setWavelengths({ kind: "range", lo: sg.lo, hi: sg.hi }, { reload: true }) }] : []),
@@ -393,30 +407,45 @@ function updateNotice() {
     showNotice(ui.notice, { ...NOTICES.saturated(ui.band.value), actions: ui.band.value === "D6" ? [] : [{ label: `Try ${next}`, onClick: () => { ui.band.value = next; ui.band.dispatchEvent(new Event("change")); } }] });
     return;
   }
+  if (state.view === "smooth") {
+    showNotice(ui.notice,{tone:"info",title:"Smooth playback blends two observations.",why:"Intermediate appearances are a visual transition, not extra observations. Use Play passes for scientific inspection."}); return;
+  }
+  if (isMatched() && ["diff","changes","pair"].includes(state.view)) {
+    showNotice(ui.notice,{tone:"info",title:"Wavelengths are matched at the field centre.",why:"Off-centre brightness residuals can include spectral, PSF and saturation effects. Click a source for its own spectrum; change candidates need independent verification."});return;
+  }
   clearNotice(ui.notice);
 }
 
 function renderBadges() {
-  const fr = passFrames();
+  const colourProduct = state.view === "colours" && state.cube?.channels;
+  const fr = colourProduct ? state.cube.channels : passFrames();
   const out = [];
   if (fr.some((f) => f.target_flagged || f.target_flags?.includes("OVERFLOW"))) {
     const b = el("span", { class: "badge badge-warn", title: "OVERFLOW: the target's core saturates the detector in this band", text: "⚠ Saturated core" });
     out.push(b);
   }
-  if (isMatched() && state.wl.kind === "detector") out.push(el("span", { class: "badge badge-ok", title: `Channels in every pass: ${state.frames.matched_channels?.join(", ")}`, text: `Fair comparison${state.frames.lam_eff_um ? ` · ${state.frames.lam_eff_um.toFixed(3)} µm` : ""}` }));
-  if (state.wl.kind === "range") out.push(el("span", { class: "badge", text: rangeText(state.wl) }));
-  const prov = state.frames?._provenance?.kind;
-  if (prov === "precomputed") out.push(el("span", { class: "badge", title: `Saved observations of this test target (release ${state.frames.release || "?"}), built by the same pipeline as the live backend. Add ?fresh=1 to the URL to rebuild them live.`, text: "Saved observations" }));
-  else if (prov === "live") out.push(el("span", { class: "badge badge-new", title: `Built just now or cached by ${apiLabel()}`, text: "Live" }));
+  if (!colourProduct && isMatched() && state.wl.kind === "detector") out.push(el("span", { class: "badge badge-ok", title: `Channels in every pass: ${state.frames.matched_channels?.join(", ")}`, text: `Centre-matched · quick look${state.frames.lam_eff_um ? ` · ${state.frames.lam_eff_um.toFixed(3)} µm` : ""}` }));
+  if (!colourProduct && state.wl.kind === "range") out.push(el("span", { class: "badge", text: rangeText(state.wl) }));
+  if (colourProduct) out.push(el("span",{class:"badge",text:`${state.cube.channels.length} spectral channels · passes combined`}));
+  const product = state.view === "colours" && state.cube?.channels ? state.cube : state.frames;
+  const prov = product?._provenance?.kind;
+  const complete = product?.completeness;
+  if (complete?.failed) out.push(el("span",{class:"badge badge-warn",text:`Partial result · ${complete.failed} downloads failed`,title:"Repeat the search to retry missing inputs."}));
+  if (product) out.push(el("span",{class:"badge",text:"Sampled archive coverage",title:"Temporal search budgets limit selected exposures; results are not an exhaustive survey of every input file."}));
+  if (prov === "precomputed") out.push(el("span", { class: "badge", title: `Saved observations of this test target (release ${state.frames.release || "?"}), built by the same pipeline as the live backend. Add ?fresh=1 to require the backend; its cache is reported separately.`, text: "Saved observations" }));
+  else if (prov === "live") out.push(el("span", { class: "badge badge-new", title: `${product._provenance.label} · ${apiLabel()}`, text: product.retrieval?.kind === "built" ? "Archive build" : product.retrieval?.kind === "server_cache" ? "Server cache" : "Backend observations" }));
   ui.badges.replaceChildren(...out);
 }
 
 // ---- rendering ----
 function render() {
-  ui.stageEmpty.hidden = !!state.frames;
-  for (const c of [ui.savePng,ui.saveMovie,ui.zoom,ui.showOverlay,ui.showEvents,ui.stretch,ui.cmap,ui.clip,...ui.views]) c.disabled=!state.frames || !!state.recording;
+  const ready = !!passFrames().length;
+  ui.stageEmpty.hidden = ready;
+  $("pair-stage").hidden = !ready || state.view !== "pair";
+  ui.stage.hidden = ready && state.view === "pair";
+  for (const c of [ui.savePng,ui.saveMovie,ui.zoom,ui.showOverlay,ui.showEvents,ui.stretch,ui.cmap,ui.clip,...ui.views]) c.disabled=!ready || !!state.recording;
   updatePlayerUI();
-  if (!state.frames) {
+  if (!ready) {
     ui.image.getContext("2d").clearRect(0, 0, ui.image.width, ui.image.height);
     ui.overlay.getContext("2d").clearRect(0, 0, ui.overlay.width, ui.overlay.height);
     ui.legend.hidden = true;
@@ -427,7 +456,29 @@ function render() {
   const opts = { stretch: ui.stretch.value, cmap: ui.cmap.value, clip: parseFloat(ui.clip.value) };
   let label = "", epoch = fr[state.index]?.epoch_label, showMarks = true;
   const view = fr.length < 2 && state.view !== "colours" ? "blink" : state.view;
-  if (view === "colours" && state.cube?.channels?.length) {
+  const fade = $("transition");
+  const frameKey = `${state.target?.ra},${state.target?.dec},${state.wl.kind},${state.index}`;
+  if (view === "smooth" && state.lastSmoothKey !== frameKey && !REDUCED_MOTION && ui.image.width === wcs.width) {
+    fade.width=ui.image.width; fade.height=ui.image.height;
+    fade.getContext('2d').drawImage(ui.image,0,0);
+    fade.style.transition='none';fade.style.opacity='1';
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{fade.style.transition=`opacity ${700/player.fps}ms linear`;fade.style.opacity='0';}));
+    state.lastSmoothKey=frameKey;
+  } else if (view !== "smooth") fade.style.opacity='0';
+  if (view === "pair") {
+    const limitsFrom = state.limitsFor === fr ? state.intensityValues : (state.limitsFor=fr,state.intensityValues=fr.flatMap(f=>f.data));
+    for (const [side,f] of [["a",frameA()],["b",frameB()]]) {
+      draw($("pair-"+side),f.data,wcs.width,wcs.height,{...opts,limitsFrom});
+      $("pair-label-"+side).textContent=`${side.toUpperCase()} · ${f.epoch_label} · ${mjdDate(f.mjd_mean ?? f.mjd_start)}`;
+      const po=prepareOverlay($("pair-overlay-"+side),wcs,state.zoom);
+      if(ui.showOverlay.checked) drawGaia(po,state.sources,wcs,f.epoch_label);
+      if(ui.showEvents.checked) drawEvents(po,state.events,{selected:state.selected});
+      if(state.pick) drawPick(po,state.pick);
+    }
+    draw(ui.image,frameA().data,wcs.width,wcs.height,{...opts,limitsFrom});
+    label=`A: ${frameA().epoch_label} · B: ${frameB().epoch_label} · shared stretch and zoom`;
+    epoch=null;showMarks=false;
+  } else if (view === "colours" && state.cube?.channels?.length) {
     const ch = state.cube.channels[state.colourIndex % state.cube.channels.length];
     draw(ui.image, ch.data, state.cube.wcs.width, state.cube.wcs.height, { ...opts, range: state.cube.display_range });
     label = `${ch.channel} · ${ch.lam_um.toFixed(3)} µm (${state.colourIndex + 1}/${state.cube.channels.length})`;
@@ -471,11 +522,12 @@ const player = new Player((i) => {
   else state.index = i;
   render();
 });
+document.addEventListener("visibilitychange",()=>{player.setSuspended(document.hidden);if(!document.hidden) render();});
 if (REDUCED_MOTION) player.playing = false;   // respect "reduced motion": start paused
 
 function updatePlayerUI() {
   ui.play.textContent = player.playing ? "Pause" : "Play";
-  const moving = state.view === "blink" || state.view === "colours";
+  const moving = ["blink","smooth","colours"].includes(state.view);
   for (const b of [ui.play, ui.prev, ui.next]) b.disabled = !!state.recording || !moving || player.count < 2;
 }
 
@@ -548,7 +600,7 @@ async function measureSpectrum(ra, dec) {
     state.spectrum = { ...s, ra, dec };
     if (ui.advanced.open) refreshAdvanced();
   } catch (err) {
-    if (err.name !== "AbortError") spectrumMessage(err.code === "not_found" ? "No source measured here" : "Spectrum unavailable offline here (needs the backend)");
+    if (err.name !== "AbortError" && !ac.signal.aborted) spectrumMessage(err.code === "not_found" ? "No source measured here" : `Spectrum unavailable: ${err.message}`);
   }
 }
 
@@ -563,6 +615,13 @@ ui.image.addEventListener("click", (e) => {
   if (hit && ui.showEvents.checked) selectEvent(hit.id);
   const { ra, dec } = pixelToSky(x, y, wcs);
   measureSpectrum(ra, dec);
+});
+
+for (const id of ["pair-a","pair-b"]) $(id).addEventListener("click",event=>{
+  if(!state.frames) return;
+  const canvas=event.currentTarget,r=canvas.getBoundingClientRect(),w=state.frames.wcs;
+  const p=pixelToSky((event.clientX-r.left)/r.width*w.width,(event.clientY-r.top)/r.height*w.height,w);
+  measureSpectrum(p.ra,p.dec);
 });
 
 // ---- wavelengths: whole band, channel range, molecules ----
@@ -623,9 +682,13 @@ async function loadRange(ac) {
     rememberLams(cube);
     const r = framesFromCube(cube, lo, hi, state.base.frames);
     const lams = r.channels.map((c) => channelLam(ui.band.value, +c.slice(-2), state.lamTable));
-    return { ...state.base, wcs: cube.wcs, frames: r.frames, matched: true, matched_channels: r.channels,
+    return { ra:cube.ra,dec:cube.dec,fov:cube.fov,band:cube.det,units:cube.units,release:cube.release,
+      inputs:cube.selected_input_records?.filter(record=>r.frames.some(frame=>frame.obs_ids.includes(record.obs_id))),
+      comparison_scope:cube.channel_at === 'pixel' ? 'pixel' : 'field_centre_quicklook',
+      wcs: cube.wcs, frames: r.frames, matched: true, matched_channels: r.channels,
       lam_eff_um: lams.length ? lams.reduce((a, b) => a + b, 0) / lams.length : null,
-      range: { lo, hi, skipped: r.skipped, suggest: r.frames.length < 2 ? suggestRange(cube, lo, hi) : null } };
+      _provenance:cube._provenance, retrieval:cube.retrieval, provenance:cube.provenance, completeness:cube.completeness,
+      range: { lo, hi, missing:r.missing, skipped: r.skipped, suggest: r.frames.length < 2 ? suggestRange(cube, lo, hi) : null } };
   } catch (e) {
     if (e.name === "AbortError") return null;
     state.loadError = {
@@ -633,7 +696,7 @@ async function loadRange(ac) {
       why: e.code === "offline" ? "They need the live backend; offline, only WISE 0855 (D6) has per-pass channels baked in." : e.message,
       actions: [{ label: "Use the whole band", primary: true, onClick: () => setWavelengths({ kind: "detector" }, { reload: true }) }],
     };
-    return state.base;
+    return {ra:state.base.ra,dec:state.base.dec,fov:state.base.fov,band:ui.band.value,wcs:state.base.wcs,frames:[],range:{lo,hi}};
   } finally { if (!ac?.signal.aborted) hideProgress(); }
 }
 
@@ -657,13 +720,13 @@ async function loadColours() {
     const cube = await api.cube({ ra: state.base.ra, dec: state.base.dec, fov: state.base.fov, det: ui.band.value }, {
       preset: state.preset, signal: ac?.signal, onProgress: (job) => showProgress(jobText(job, t0), job),
     });
-    if (state.cubeKey !== key) return;
+    if (ac?.signal.aborted || state.cubeKey !== key) return;
     rememberLams(cube);
     cube.channels = cube.channels.filter((c) => Array.isArray(c.data));
     state.cube = cube;
     if (state.view === "colours") startColours();
   } catch (e) {
-    if (e.name === "AbortError") return;
+    if (e.name === "AbortError" || ac?.signal.aborted || state.cubeKey !== key) return;
     state.cube = { error: {
       tone: "empty", title: "The channel-by-channel view isn't available here yet.",
       why: e.code === "offline" ? "It needs the live backend. Offline it is baked for Barnard's Star (D2), ε Indi B (D3), RW Aur (D2) and WISE 0855 (D3–D6)." : e.message,
@@ -675,10 +738,12 @@ async function loadColours() {
 }
 function startColours() {
   const n = state.cube.channels.length;
+  renderBadges();
   player.load(n, Math.min(state.colourIndex, n - 1));
   renderFilmstrip();
   updatePlayerUI();
   updateNotice();
+  if(ui.advanced.open) refreshAdvanced();
 }
 function renderFilmstrip() {
   const c = state.cube;
@@ -701,8 +766,9 @@ function highlightFilmstrip() {
 // ---- URL state ----
 function writeURL() {
   const url = new URL(location.href);
-  const keep = ["mock", "embed", "fresh"].filter((k) => url.searchParams.has(k)).map((k) => [k, url.searchParams.get(k)]);
+  const keep = ["mock", "embed", "fresh", "api"].filter((k) => url.searchParams.has(k)).map((k) => [k, url.searchParams.get(k)]);
   url.search = "";
+  if (API_BASE !== DEPLOYED_API) url.searchParams.set("api", API_BASE);
   for (const [k, v] of keep) url.searchParams.set(k, v);
   url.searchParams.set("mode", state.mode);
   const t = state.target;
@@ -728,7 +794,7 @@ const fitsURL = () => (state.base?._provenance?.kind === "live" && state.target 
   ? api.framesFitsURL({ ra: state.base.ra, dec: state.base.dec, fov: state.base.fov, band: ui.band.value, matched: ui.matched.checked }) : null);
 
 // ---- the one loader every mode ends in ----
-async function loadTarget({ ra, dec, label, name = null, pm = null }) {
+async function loadTarget({ ra, dec, label, name = null, pm = null, retryMissing = false }) {
   if (state.recording) { showBanner('A movie is recording. Please wait until the download is ready before changing targets.'); return; }
   nameAbort?.abort();
   state.jobAbort?.abort();
@@ -740,16 +806,18 @@ async function loadTarget({ ra, dec, label, name = null, pm = null }) {
   hideBanner();
 
   ra = ((ra % 360) + 360) % 360;
-  const q = { ra: +ra.toFixed(6), dec: +dec.toFixed(6), fov: fovValue(), band: ui.band.value, matched: ui.matched.checked };
-  const sameField = state.target && sepDeg(state.target.ra, state.target.dec, q.ra, q.dec) < 1e-6;
+  const q = { ra: +ra.toFixed(6), dec: +dec.toFixed(6), fov: fovValue(), band: ui.band.value, matched: ui.matched.checked, retryMissing };
+  const sameField = state.base && sepDeg(state.base.ra, state.base.dec, q.ra, q.dec) < 1e-6 && state.base.fov === q.fov && state.base.band === q.band;
   state.target = { ra: q.ra, dec: q.dec, label: label || fmtDeg(q.ra, q.dec), name, pm };
   state.preset = nearestPreset(q.ra, q.dec)?.slug || null;
   writeURL();
-  const title = `${state.target.label} · ${q.band}${q.matched ? " fair" : ""} · ${q.fov}°`;
+  const title = `${state.target.label} · ${q.band}${q.matched ? " · centre-matched" : ""} · ${q.fov}°`;
   ui.showOnSky.hidden = state.mode === "explore";
   syncSky();
 
   state.frames = state.base = null;
+  state.loadError=null; state.cube=null; state.cubeKey=null;
+  if (!sameField) {state.sources=null;state.movers=null;}
   state.events=[]; state.spectrum=null; state.pick=null; state.adv={};
   ui.badges.replaceChildren(); ui.filmstrip.replaceChildren(); ui.notice.hidden=true;
   player.load(0); render(); renderEvents(); renderTimeline(); refreshAdvanced();
@@ -774,7 +842,11 @@ async function loadTarget({ ra, dec, label, name = null, pm = null }) {
       state.loadError = { ...n, why: `${e.message} ${n.why}${dataThrough ? ` Data through ${dataThrough}.` : ""}`,
         actions: other.map((d) => ({ label: `Try ${d}`, onClick: () => { ui.band.value = d; ui.band.dispatchEvent(new Event("change")); } })) };
     } else {
-      state.loadError = { ...NOTICES.backendDown(e.message), actions: [
+      const notice = ["invalid_response","stalled","busy","bad_request"].includes(e.code)
+        ? {tone:"error",title:e.code === "bad_request" ? "This request needs different settings." : e.code === "invalid_response" ? "The data service returned an invalid result." : e.code === "busy" ? "The processing queue is busy." : "Processing stopped reporting progress.",why:e.message}
+        : NOTICES.backendDown(e.message);
+      state.loadError = { ...notice, actions: [
+        ...(e.code === 'bad_request' && q.fov > .04 ? [{label:'Try 0.04°',primary:true,onClick:()=>{setFov(.04);loadTarget(state.target);}}] : []),
         { label: "Retry", primary: true, onClick: () => loadTarget(state.target) },
         { label: "Try Barnard's Star", onClick: () => choosePreset(PRESETS[0]) }] };
     }
@@ -812,7 +884,7 @@ async function loadTarget({ ra, dec, label, name = null, pm = null }) {
   collapseSearch();
   writeURL();
 
-  // extras: Gaia overlay and the movers search (both feed the events)
+  // Fetch the small overlay after images; expensive analyses wait for Advanced.
   const extra = state.extraAbort;
   if (!state.sources) {
     api.overlay({ ra: q.ra, dec: q.dec, fov: q.fov }, { preset: state.preset, signal: extra.signal })
@@ -821,15 +893,6 @@ async function loadTarget({ ra, dec, label, name = null, pm = null }) {
   }
   state.movers = null;
   state.variability = null;
-  // a light curve only means something for a named object at the field centre (not an arbitrary patch of sky)
-  if (name || state.preset) {
-    api.lightcurve({ ra: q.ra, dec: q.dec, det: q.band }, { preset: state.preset, signal: extra.signal })
-      .then((lc) => { if (!extra.signal.aborted) { state.variability = lc; state.adv.lightcurve = lc; computeEvents(); render(); if(ui.advanced.open) refreshAdvanced(); } })
-      .catch(() => { /* no light curve here: no variability claim */ });
-  }
-  api.movers({ ra: q.ra, dec: q.dec, fov: q.fov, band: q.band }, { preset: state.preset, signal: extra.signal })
-    .then((m) => { if (!extra.signal.aborted) { state.movers = m; computeEvents(); render(); if (ui.advanced.open) refreshAdvanced(); } })
-    .catch((e) => { if (e.name !== "AbortError") state.movers = { error: e.code === "offline" ? "The movers search needs the live backend for this position." : e.message }; });
   if (ui.advanced.open) loadAdvanced();
 }
 
@@ -862,9 +925,15 @@ function loadAdvanced() {
   const get = (key, fn) => {
     if (state.adv[key]) return;
     state.adv[key] = "loading";
-    fn().then((r) => { if (!signal?.aborted) state.adv[key] = r; }).catch((e) => { if (!signal?.aborted && e.name !== "AbortError") state.adv[key] = { error: e.code === "offline" ? "Needs the live backend for this position." : e.message }; })
+    fn().then((r) => { if (!signal?.aborted) {
+      state.adv[key] = r;
+      if(key === "lightcurve") state.variability=r;
+      if(key === "movers") state.movers=r;
+      computeEvents();render();
+    } }).catch((e) => { if (!signal?.aborted && e.name !== "AbortError") state.adv[key] = { error: e.code === "offline" ? "Needs the live backend for this position." : e.message }; })
       .finally(() => { if (!signal?.aborted) refreshAdvanced(); });
   };
+  get("movers", () => api.movers({...q,fov:state.base.fov,band:ui.band.value},opts));
   get("exposures", () => api.exposures({ ...q, fov: state.base.fov }, opts));
   const det = ui.band.value;
   const pm = state.target?.pm;
@@ -874,9 +943,10 @@ function loadAdvanced() {
 }
 function refreshAdvanced() {
   renderAdvanced(ui.advBody, {
+    displayedCube:state.view === "colours" && state.cube?.channels ? state.cube : null,
     target: state.target, resp: state.frames, band: ui.band.value, matched: isMatched(),
     exposures: state.adv.exposures, motion: state.adv.motion, lightcurve: state.adv.lightcurve,
-    movers: state.movers, events: state.events, spectrum: state.spectrum, threshold: THRESHOLD,
+    movers: state.adv.movers || state.movers, events: state.events, spectrum: state.spectrum, threshold: THRESHOLD,
     fitsURL: fitsURL(), sexa: state.target ? fmtSexa(state.target.ra, state.target.dec) : "", pick: state.pick,
   });
 }
@@ -888,6 +958,12 @@ ui.advanced.addEventListener("toggle", () => {
 
 // ---- saving: image and movie ----
 function composite(scale = 5) {
+  if(state.view === "pair") {
+    const w=$("pair-a").width*scale,h=$("pair-a").height*scale,c=document.createElement('canvas');
+    c.width=w*2;c.height=h+48;const ctx=c.getContext('2d');ctx.fillStyle='#000';ctx.fillRect(0,0,c.width,c.height);
+    for(const [i,id] of ['a','b'].entries()) {ctx.drawImage($("pair-"+id),i*w,0,w,h);ctx.drawImage($("pair-overlay-"+id),i*w,0,w,h);}
+    ctx.fillStyle='#fff';ctx.font='14px system-ui';ctx.fillText(ui.frameLabel.textContent,8,h+20);ctx.fillText(ui.targetLabel.textContent+' · SPHEREx NASA/IPAC',8,h+40);return c;
+  }
   const W = ui.image.width * scale, H = ui.image.height * scale;
   const c = document.createElement("canvas");
   c.width = W; c.height = H + 28;
@@ -905,7 +981,7 @@ ui.savePng.addEventListener("click", () => {
   const saved = state.zoom; state.zoom = 1; applyZoom(); render();
   composite().toBlob((b) => {
     const a = el("a", { href: URL.createObjectURL(b), download: `spherex-${state.preset || "field"}-${state.view}.png` });
-    document.body.append(a); a.click(); a.remove();
+    document.body.append(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),1000);
     state.zoom = saved; applyZoom(); render();
   });
 });
@@ -946,7 +1022,7 @@ ui.saveMovie.addEventListener("click", async () => {
     stream?.getTracks().forEach(t=>t.stop());state.recording=false;
     for(const [el,disabled] of locked) el.disabled=disabled;
     ui.saveMovie.textContent='Save movie';
-    setView(original.view,{silent:true});player.load(player.count,original.index);
+    setView(original.view,{silent:true});player.load(player.count,original.index,["blink","smooth","colours"].includes(original.view));
     if(player.playing!==original.playing) player.toggle();updatePlayerUI();render();
   }
 });
@@ -1037,7 +1113,7 @@ async function searchName(name, { band } = {}) {
     if(lookup.signal.aborted || e.name === "AbortError") return;
     if (e.code === "not_found") {
       showResult([["", `No object called “${name}” was found. Check the spelling, or use Coordinates.`]]);
-    } else if (preset) {
+    } else if (preset && !strictFresh()) {
       r = { name: preset.label, ra: preset.ra, dec: preset.dec, source: "preset" };
     } else {
       showResult([["", `Name lookup is unavailable right now (${e.message}). Try again, or use Coordinates.`]]);
@@ -1056,7 +1132,7 @@ async function searchName(name, { band } = {}) {
   rememberName(name);
   if (r.name) r.name = r.name.replace(/^NAME\s+/, "");
   // a test target found by name uses its baked position, so the saved observations apply exactly
-  if (preset) { r.name = preset.label; r.ra = preset.ra; r.dec = preset.dec; }
+  if (preset && !strictFresh() && r._provenance?.kind === "precomputed") { r.name = preset.label; r.ra = preset.ra; r.dec = preset.dec; }
   const pmTotal = Math.hypot(r.pmra || 0, r.pmdec || 0);
   showResult([
     ["Object", r.name || name],
@@ -1303,7 +1379,7 @@ api.health().then((h) => {
     : `Backend: ${apiLabel()} — not reachable. The five test targets still work from saved data${switchHint}.`;
   backendStatus.classList.toggle("bad", !h?.ok);
 });
-api.meta({ check: true }).then((m) => {
+api.meta().then((m) => {
   dataThrough = m?.index?.data_through || null;
   if (dataThrough) ui.dataSpan.textContent = `SPHEREx data through ${dataThrough}.`;
   const last = store.get(SEEN_KEY);

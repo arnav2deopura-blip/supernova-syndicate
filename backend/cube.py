@@ -25,6 +25,11 @@ from .fits_processor import PreparedStamp, assign_epochs, coadd_clipped, epoch_l
 from .image_alignment import reproject_to, to_display_rows
 from .pipeline import Progress, output_grid
 
+def cache_report(ra,dec,fov,det):
+    from . import cache,spherex_client
+    key=cache.cache_key('retrieval',ra,dec,fov,str(det),spherex_client.data_version())
+    return cache.get_json(key) or {}
+
 FAST_MOVER_MAS_YR = 1000.0   # > 1"/yr: smears visibly in an all-passes stack
 
 
@@ -36,7 +41,7 @@ class CubeProduct:
 
 def stamp_channel(s: PreparedStamp) -> Optional[channels.Channel]:
     """Channel at the target. A small tolerance absorbs rounding at the detector's band edges."""
-    return channels.assign(s.detector, s.lam_um, tol_um=0.005)
+    return channels.assign(s.detector, s.lam_um, tol_um=0.005) if np.isfinite(s.lam_um) else None
 
 
 def strict_image(s: PreparedStamp, subchan: int) -> np.ndarray:
@@ -125,12 +130,14 @@ def build_cube(ra: float, dec: float, fov: float, band: str, per_pass: bool = Fa
             continue   # empty channels are omitted, never returned as all-NaN
         disp = to_display_rows(img)
         arrays.append(disp)
-        lam_t = [s.lam_um for s, _, _ in group]
+        lam_t = [s.lam_um for s, _, _ in group if np.isfinite(s.lam_um)]
         by_chan[sub].append({
             "pass": p, "blob": len(arrays) - 1, "n_exposures": len(group),
             "coverage": round(float(np.mean(np.isfinite(img))), 4),
-            "lam_target_um": round(float(np.mean(lam_t)), 4),
+            "lam_target_um": round(float(np.mean(lam_t)), 4) if lam_t else channels.for_detector(det)[sub-1].wavelength,
             "mjd_mean": round(float(np.mean([s.mjd for s, _, _ in group])), 5),
+            "mjd_start": round(min(s.mjd for s,_,_ in group),5),
+            "mjd_end": round(max(s.mjd for s,_,_ in group),5),
             "passes": sorted({q for _, _, q in group}),
             "target_value": _target_value(disp),
             "target_flags": sorted({f for s, _, _ in group for f in s.target_flags}),
@@ -231,10 +238,12 @@ def build_matched_frames(ra: float, dec: float, fov: float, band: str, progress:
                 progress("coadd", done, n_cells)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)   # all-NaN pixels stay NaN
-            img = np.nanmean(np.stack(chan_imgs), axis=0).astype(np.float32)
+            img = np.mean(np.stack(chan_imgs), axis=0).astype(np.float32)
             ev = np.stack(chan_errs).astype(np.float64)
             nfin = np.isfinite(ev).sum(axis=0)
             err = (np.sqrt(np.nansum(ev ** 2, axis=0)) / np.where(nfin > 0, nfin, np.nan)).astype(np.float32)
+        err[~np.isfinite(img)] = np.nan
+        if not np.isfinite(img).any(): continue
         noise.append(to_display_rows(err))
         mjds = [s.mjd for s in used]
         arrays.append(to_display_rows(img))
@@ -262,10 +271,15 @@ def build_matched_frames(ra: float, dec: float, fov: float, band: str, progress:
         "wcs": {"center_ra": ra, "center_dec": dec,
                 "pixel_scale_arcsec": cfg["pixel_scale_arcsec"] / cfg["oversample"], "width": w, "height": h},
         "matched": True,
+        "comparison_scope":"field_centre_quicklook",
+        "warning":"Wavelengths are matched at the field centre. Off-centre brightness comparisons require source-centred spectral measurements; resampled pixels are correlated.",
         "matched_channels": [chans[s].label for s in common],
         "lam_eff_um": round(float(np.mean([chans[s].wavelength for s in common])), 4),
         "frames": frames,
     }
+    from .provenance import manifest
+    meta['provenance']=manifest()
+    meta['completeness']={**(cache_report(ra,dec,fov,det)), 'selection_policy':'bounded per-detector temporal sampling; not guaranteed exhaustive'}
     noise, k = pipeline.calibrate_noise(arrays, noise)
     for f, kf in zip(frames, k or []):
         f["noise_scale"] = kf

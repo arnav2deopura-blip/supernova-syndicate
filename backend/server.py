@@ -7,7 +7,10 @@ from __future__ import annotations
 import hashlib
 import re
 import threading
-from collections import defaultdict
+import weakref
+import json
+import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
@@ -37,7 +40,7 @@ cfg = get_config()
 MAX_FOV = cfg["fov"]["max_deg"]
 DEFAULT_FOV = cfg["fov"]["default_deg"]
 
-app = FastAPI(title="SPHEREx Sky Explorer API", version="0.4.0")
+app = FastAPI(title="Sphere Shift API", version="0.4.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cfg["allowed_origins"],
@@ -71,6 +74,11 @@ async def _not_found(_: Request, exc: Exception):
     return error("not_found", str(exc))
 
 
+@app.exception_handler(pipeline.RequestTooLarge)
+async def _too_large(_: Request, exc:pipeline.RequestTooLarge):
+    return error('bad_request',str(exc))
+
+
 @app.exception_handler(RequestValidationError)
 async def _bad_request(_: Request, exc: RequestValidationError):
     first = exc.errors()[0] if exc.errors() else {}
@@ -83,13 +91,16 @@ DEC = Query(..., ge=-90, le=90, description="ICRS degrees")
 FOV = Query(DEFAULT_FOV, gt=0, le=MAX_FOV, description="Cutout side, degrees")
 
 # One lock per product key, so identical concurrent requests build it once.
-_locks: dict[str, threading.Lock] = defaultdict(threading.Lock)
+_locks = weakref.WeakValueDictionary()
 _locks_guard = threading.Lock()
 
 
 def _lock(key: str) -> threading.Lock:
     with _locks_guard:
-        return _locks[key]
+        lock=_locks.get(key)
+        if lock is None:
+            lock=threading.Lock();_locks[key]=lock
+        return lock
 
 
 def _blob_dir() -> Path:
@@ -102,10 +113,10 @@ def _save_blob(arr: np.ndarray) -> str:
     raw = np.ascontiguousarray(arr, dtype="<f4").tobytes()
     blob_id = hashlib.sha1(raw).hexdigest()[:24]
     path = _blob_dir() / f"{blob_id}.bin"
-    if not path.exists():
-        tmp = path.with_suffix(".tmp")
-        tmp.write_bytes(raw)
-        tmp.replace(path)
+    with cache._pins_guard:
+        if not path.exists():
+            cache.atomic_write(path, raw)
+        cache.lease([path])
     return blob_id
 
 
@@ -140,16 +151,35 @@ def resolve(name: str = Query(..., min_length=1)):
     return catalogs.resolve_name(name)
 
 
-JOBS = jobs.JobManager(workers=cfg.get("jobs", {}).get("workers", 2))
+JOBS = jobs.JobManager(workers=cfg.get("jobs", {}).get("workers", 2), capacity=cfg.get('jobs',{}).get('capacity',8))
+
+@app.exception_handler(jobs.QueueFull)
+async def _busy(_:Request, exc:jobs.QueueFull):
+    return JSONResponse({'error':'busy','message':str(exc)},status_code=429,headers={'Retry-After':'30'})
 
 
 def _classify(exc: Exception) -> tuple[str, str]:
     """Exception -> (API error code, message), same mapping as the exception handlers."""
+    if isinstance(exc,pipeline.RequestTooLarge): return 'bad_request',str(exc)
     if isinstance(exc, (pipeline.NoCoverage, catalogs.NameNotFound, motion.NotEnoughData)):
         return "not_found", str(exc)
     if isinstance(exc, (spherex_client.UpstreamError, catalogs.ResolverUnavailable)):
         return "upstream_unavailable", str(exc)
     return "upstream_unavailable", f"Unexpected error while building the product: {exc}"
+
+
+_build_slots=threading.BoundedSemaphore(cfg.get('jobs',{}).get('workers',2))
+_build_owner=threading.local()
+@contextmanager
+def _admission():
+    nested=getattr(_build_owner,'active',False)
+    if not nested and not _build_slots.acquire(blocking=False):
+        raise jobs.QueueFull('All processing workers are occupied. Retry in 30 seconds, using async=1 for a queued search.')
+    _build_owner.active=True
+    try: yield
+    finally:
+        _build_owner.active=nested
+        if not nested: _build_slots.release()
 
 
 def _frames_key(ra, dec, fov, band, matched: bool = False) -> str:
@@ -160,35 +190,43 @@ def _frames_key(ra, dec, fov, band, matched: bool = False) -> str:
 
 def _cached_frames(key: str):
     meta = cache.get_json(key)
-    if meta and all((_blob_dir() / f"{f[k]}.bin").exists() for f in meta["frames"] for k in ("blob", "noise_blob")
-                    if k in f):
+    if meta and cache.retain([_blob_dir()/f"{f[k]}.bin" for f in meta["frames"] for k in ("blob","noise_blob","coverage_blob") if k in f]):
         return meta
     return None
 
 
-def _build_frames(ra, dec, fov, band, progress=None, matched: bool = False) -> dict:
+def _build_frames(ra, dec, fov, band, progress=None, matched: bool = False, retry_missing: bool = False) -> dict:
     key = _frames_key(ra, dec, fov, band, matched)
-    with _lock(key):
+    with _lock(key), _admission():
         meta = _cached_frames(key)
+        if retry_missing and meta and meta.get("completeness",{}).get("failed"): meta=None
         if meta is None:
             build = cube.build_matched_frames if matched else pipeline.build_frames
             product = build(ra, dec, fov, band, progress=progress)
             pipeline.add_frame_qc(product, ra, dec, fov, _field(ra, dec, fov))
-            meta = product.meta
+            meta = json_safe(product.meta)
+            used={obs for frame in meta['frames'] for obs in frame.get('obs_ids',[])}
+            records=cache.get_json(cache.cache_key('exposures',ra,dec,fov,'',spherex_client.data_version()))
+            meta['inputs']=[r for r in records if r['detector']==int(band[1]) and r['obs_id'] in used] if records is not None else None
             for f, arr in zip(meta["frames"], product.arrays):
                 f["blob"] = _save_blob(arr)
             for f, arr in zip(meta["frames"], product.noise or []):
                 f["noise_blob"] = _save_blob(arr)
+            for f, arr in zip(meta['frames'], product.coverage or []):
+                f['coverage_blob'] = _save_blob(arr)
             cache.put_json(key, meta)
             cache.prune()  # after every new product: keeps a memory-backed /tmp from filling up
     return meta
 
 
 def _with_urls(request: Request, meta: dict) -> dict:
+    cache.lease([_blob_dir()/f"{f[k]}.bin" for f in meta['frames'] for k in ('blob','noise_blob','coverage_blob') if k in f])
     out = {**meta, "frames": []}
     for f in meta["frames"]:
         f = dict(f)
         f["data"] = str(request.url_for("blob", blob_id=f.pop("blob")))
+        if 'coverage_blob' in f:
+            f['coverage']=str(request.url_for('blob',blob_id=f.pop('coverage_blob')))
         if "noise_blob" in f:
             f["noise"] = str(request.url_for("blob", blob_id=f.pop("noise_blob")))
         out["frames"].append(f)
@@ -199,7 +237,8 @@ def _with_urls(request: Request, meta: dict) -> dict:
 def frames(request: Request, ra: float = RA, dec: float = DEC, fov: float = FOV, band: Band = "D2",
            matched: bool = Query(False, description="Same effective bandpass in every pass: only channels "
                                                      "observed in every pass, equal weight per channel"),
-           async_: bool = Query(False, alias="async", description="If not cached, return 202 + a job instead of waiting")):
+           async_: bool = Query(False, alias="async", description="If not cached, return 202 + a job instead of waiting"),
+           retry_missing: bool = Query(False,description="Retry failed downloads in a partial frame product")):
     """Co-added frames, one per survey pass. Cached positions answer at once.
 
     A cold position needs an archive search and downloads (~1-10 min). Without `async=1` the request
@@ -207,20 +246,24 @@ def frames(request: Request, ra: float = RA, dec: float = DEC, fov: float = FOV,
     """
     key = _frames_key(ra, dec, fov, band, matched)
     meta = _cached_frames(key)
+    if retry_missing and meta and meta.get("completeness",{}).get("failed"): meta=None
+    cached_at_entry = meta is not None
     if meta is None and async_:
-        result_url = str(request.url.include_query_params(**{"async": "0"}))
+        result_url = str(request.url.include_query_params(**{"async": "0", "retry_missing":"0"}))
 
         def work(progress):
-            _build_frames(ra, dec, fov, band, progress, matched)
-            return {"result_url": result_url}
+            _build_frames(ra, dec, fov, band, progress, matched, retry_missing)
+            return {"result_url": result_url, "retrieval": {"kind": "built", "processing": spherex_client.data_version()}}
 
-        job = JOBS.submit(key, work, _classify)
+        job = JOBS.submit(key, work, _classify, owner=request.client.host if request.client else "anonymous")
         body = job.public()
         body["status_url"] = str(request.url_for("job_status", job_id=job.id))
         return JSONResponse(body, status_code=202)
     if meta is None:
-        meta = _build_frames(ra, dec, fov, band, matched=matched)
-    return _with_urls(request, meta)
+        meta = _build_frames(ra, dec, fov, band, matched=matched,retry_missing=retry_missing)
+    out=_with_urls(request, meta)
+    out['retrieval'] = {'kind':'server_cache' if cached_at_entry else 'built', 'processing':spherex_client.data_version()}
+    return out
 
 
 @app.get("/api/frames.fits", response_class=FileResponse,
@@ -233,11 +276,12 @@ def frames_fits(ra: float = RA, dec: float = DEC, fov: float = FOV, band: Band =
     from astropy.io import fits as afits
 
     meta = _build_frames(ra, dec, fov, band, matched=matched)
+    cache.lease([_blob_dir()/f"{f[k]}.bin" for f in meta["frames"] for k in ("blob","noise_blob","coverage_blob") if k in f])
     w, h = meta["wcs"]["width"], meta["wcs"]["height"]
     hdr = pipeline.output_grid(ra, dec, fov).to_header()
     prim = afits.PrimaryHDU()
     ph = prim.header
-    ph["ORIGIN"] = ("SPHEREx Sky Explorer", "NASA Space Apps 2026")
+    ph["ORIGIN"] = ("Sphere Shift", "NASA Space Apps 2026")
     ph["TELESCOP"] = "SPHEREx"
     ph["DETECTOR"] = (band, "SPHEREx detector band")
     ph["RELEASE"] = (meta.get("release") or "", "SPHEREx data release tag")
@@ -250,13 +294,13 @@ def frames_fits(ra: float = RA, dec: float = DEC, fov: float = FOV, band: Band =
     ph["COMMENT"] = "Built from SPHEREx level-2 images (IRSA / public S3 mirror). Row order: FITS (south up)."
     hdus = [prim]
     for f in meta["frames"]:
-        for kind, key in (("IMAGE", "blob"), ("NOISE", "noise_blob")):
+        for kind, key in (("IMAGE", "blob"), ("NOISE", "noise_blob"), ("COVERAGE", "coverage_blob")):
             if key not in f:
                 continue
             arr = np.fromfile(_blob_dir() / f"{f[key]}.bin", dtype="<f4").reshape(h, w)[::-1]   # back to FITS rows
             e = afits.ImageHDU(arr, header=hdr.copy(), name=f"{kind}_{f['epoch_label']}")
             eh = e.header
-            eh["BUNIT"] = meta.get("units", "MJy/sr")
+            eh["BUNIT"] = "count" if kind == "COVERAGE" else meta.get("units", "MJy/sr")
             eh["EPOCH"] = (f["epoch_label"], "survey pass")
             eh["MJD-BEG"], eh["MJD-END"] = f["mjd_start"], f["mjd_end"]
             eh["MJD-AVG"] = (f.get("mjd_mean"), "mean exposure time")
@@ -268,14 +312,18 @@ def frames_fits(ra: float = RA, dec: float = DEC, fov: float = FOV, band: Band =
             if f.get("astrometry_rms_arcsec") is not None:
                 eh["ASTRMS"] = (f["astrometry_rms_arcsec"], "[arcsec] Gaia star scatter about registration")
             hdus.append(e)
+    manifest_bytes = json.dumps(meta, sort_keys=True).encode('utf-8')
+    hdus.append(afits.ImageHDU(np.frombuffer(manifest_bytes, dtype=np.uint8), name='MANIFEST'))
     name = f"spherex_{band}{'_matched' if matched else ''}_{ra:.4f}_{dec:+.4f}.fits"
     path = _blob_dir() / f"{cache.cache_key('fits', ra, dec, fov, band + str(matched), meta.get('release') or '')}.fits"
-    afits.HDUList(hdus).writeto(path, overwrite=True)
+    cache.atomic_fits(path, afits.HDUList(hdus))
+    cache.lease([path])
     return FileResponse(path, media_type="application/fits", filename=name)
 
 
 @app.get("/api/jobs/{job_id}", response_model=JobStatus, name="job_status")
 def job_status(request: Request, job_id: str):
+    if not re.fullmatch(r'[0-9a-f]{16}',job_id): return error('bad_request','Invalid job identifier')
     job = JOBS.get(job_id)
     if job is None:
         return error("not_found", "Unknown or expired job. Re-request the data.")
@@ -292,6 +340,7 @@ def blob(blob_id: str):
     path = _blob_dir() / f"{blob_id}.bin"
     if not path.exists():
         return error("not_found", "blob expired; re-request /api/frames")
+    cache.lease([path])
     return FileResponse(path, media_type="application/octet-stream",
                         headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
@@ -310,7 +359,7 @@ def exposures(ra: float = RA, dec: float = DEC, fov: float = FOV):
         out.append({
             "obs_id": r.obs_id, "mjd": round(r.mjd, 5), "detector": r.detector,
             "wavelength_um": d.get("lam_um"), "epoch_label": f"E{e + 1}",
-            "flags_summary": {"flag_fraction": d.get("masked_fraction", 0.0), "target_flags": d.get("target_flags")},
+            "flags_summary": {"flag_fraction": d.get("masked_fraction"), "target_flags": d.get("target_flags")},
             "url": (spherex_client.s3_archive.base_url() + r.s3_key) if r.s3_key else r.access_url,
         })
     return {"exposures": out}
@@ -359,20 +408,30 @@ def _swap_blobs(node, fn):
 
 def _cached_product(key: str):
     meta = cache.get_json(key)
-    if meta is not None and all((_blob_dir() / f"{b}.bin").exists() for b in _blob_ids(meta)):
+    if meta is not None and cache.retain([_blob_dir()/f"{b}.bin" for b in _blob_ids(meta)]):
         return meta
     return None
 
 
 def _get_product(key: str, build, progress=None) -> dict:
     """build(progress) -> (meta, arrays) or meta. Built once per key, even under concurrent requests."""
-    with _lock(key):
+    with _lock(key), _admission():
         meta = _cached_product(key)
         if meta is None:
             res = build(progress)
             meta, arrays = res if isinstance(res, tuple) else (res, [])
             ids = [_save_blob(a) for a in arrays]
             meta = _swap_blobs(meta, lambda i: ("blob", ids[i]))
+            from .provenance import manifest
+            meta['provenance'] = manifest()
+            if 'ra' in meta and 'dec' in meta:
+                fov=meta.get('fov',DEFAULT_FOV)
+                reports=[cache.get_json(cache.cache_key('retrieval',meta['ra'],meta['dec'],fov,str(d),spherex_client.data_version())) for d in range(1,7)]
+                reports=[r for r in reports if r]
+                meta['completeness']={'selection_policy':'bounded temporal sampling; not guaranteed exhaustive','detector_reports':reports,'failed':sum(r.get('failed',0) for r in reports) if reports else None}
+                records=cache.get_json(cache.cache_key('exposures',meta['ra'],meta['dec'],fov,'',spherex_client.data_version()))
+                meta['selected_input_records']=records
+            meta['reliability'] = {'status':'exploratory', 'note':'Fits and candidate significance require independent checks; resampled pixels are correlated.'}
             meta = json_safe(meta)
             cache.put_json(key, meta)
             cache.prune()
@@ -397,27 +456,31 @@ def json_safe(node):
 
 def _serve_product(request: Request, key: str, build, async_: bool):
     meta = _cached_product(key)
+    cached_at_entry = meta is not None
     if meta is None and async_:
         result_url = str(request.url.include_query_params(**{"async": "0"}))
 
         def work(progress):
             _get_product(key, build, progress)
-            return {"result_url": result_url}
+            return {"result_url": result_url, "retrieval": {"kind": "built", "processing": spherex_client.data_version()}}
 
-        job = JOBS.submit(key, work, _classify)
+        job = JOBS.submit(key, work, _classify, owner=request.client.host if request.client else "anonymous")
         body = job.public()
         body["status_url"] = str(request.url_for("job_status", job_id=job.id))
         return JSONResponse(body, status_code=202)
     if meta is None:
         meta = _get_product(key, build)
-    return _swap_blobs(meta, lambda b: ("data", str(request.url_for("blob", blob_id=b))))
+    cache.lease([_blob_dir()/f"{b}.bin" for b in _blob_ids(meta)])
+    out = _swap_blobs(meta, lambda b: ("data", str(request.url_for("blob", blob_id=b))))
+    out['retrieval'] = {'kind': 'server_cache' if cached_at_entry else 'built', 'processing':spherex_client.data_version()}
+    return out
 
 
 def _field(ra: float, dec: float, fov: float) -> list[dict]:
     """Gaia DR3 around the stamp (stamps are wider than fov), [] when Gaia is down."""
     half = spherex_client.stamp_size_px(fov) * cfg["pixel_scale_arcsec"] / 3600 / np.sqrt(2)
     try:
-        return catalogs.gaia_query(ra, dec, round(half, 3))
+        return catalogs.gaia_query(ra, dec, round(half, 3),timeout=6)
     except catalogs.ResolverUnavailable:
         return []
 
@@ -515,6 +578,8 @@ def motion_view(request: Request, ra: float = RA, dec: float = DEC,
                 st, bins = pipeline.load_stamps(ra, dec, DEFAULT_FOV, f"D{d}", progress)
             except pipeline.NoCoverage:
                 continue
+            if sum(s.image.size for s in stamps)+sum(s.image.size for s in st) > cfg.get('limits',{}).get('max_native_pixels',16_000_000):
+                raise pipeline.RequestTooLarge('The combined motion fit exceeds the per-job image budget. Select fewer detectors.')
             stamps += st
         if not stamps:
             raise pipeline.NoCoverage(f"No SPHEREx exposures cover RA {ra:.5f}, Dec {dec:.5f} in {det}.")

@@ -1,0 +1,51 @@
+{
+  "tested_utc": "2026-11-15T20:03:19.465218+00:00",
+  "ra": 269.446074,
+  "dec": 4.770711,
+  "tap_response_preview": "<!DOCTYPE HTML PUBLIC \"-//IETF//DTD HTML 2.0//EN\">\n<html><head>\n<title>502 Proxy Error</title>\n</head><body>\n<h1>Proxy Error</h1>\n<p>The proxy server received an invalid\r\nresponse from an upstream server.<br />\r\nThe proxy server could not handle the request<p>Reason: <strong>Error reading from remote server</strong></p></p>\n</body></html>\n",
+  "tap": {
+    "status": "unavailable",
+    "error": "IRSA TAP returned HTTP 502 without the expected CSV columns (archive/proxy error)."
+  },
+  "native_url": "https://irsa.ipac.caltech.edu/ibe/data/spherex/dr1/level2/2025W35_1A/l2b-v27-2026-230/2/level2_2025W35_1A_0146_1D2_spx_l2b-v27-2026-230.fits?center=269.446074,4.770711&size=0.04",
+  "s3_key": "dr1/level2/2025W35_1A/l2b-v27-2026-230/2/level2_2025W35_1A_0146_1D2_spx_l2b-v27-2026-230.fits",
+  "native_http_status": 200,
+  "comparison": "IMAGE minus ZODI at the same sky pixel, before stamp-dependent local background subtraction",
+  "native": {
+    "shape": [
+      23,
+      23
+    ],
+    "wavelength_um": 1.5172319181553275,
+    "target_flags": [
+      "BLOOM",
+      "SUR_ERROR",
+      "TRANSIENT"
+    ],
+    "target_pixel": 44.46909713745117
+  },
+  "s3": {
+    "shape": [
+      32,
+      32
+    ],
+    "wavelength_um": 1.5172319181553275,
+    "target_flags": [
+      "BLOOM",
+      "SUR_ERROR",
+      "TRANSIENT"
+    ],
+    "target_pixel": 44.46909713745117
+  },
+  "wavelength_difference_um": 0.0,
+  "epsf_max_difference": 0.0,
+  "native_origin": [
+    194,
+    431
+  ],
+  "s3_origin": [
+    189,
+    426
+  ],
+  "passed": true
+}

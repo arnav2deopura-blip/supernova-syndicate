@@ -26,7 +26,8 @@ const params = () => (typeof location === "undefined" ? new URLSearchParams() : 
 const isDemo = () => params().has("mock");
 // The five test targets have saved bakes from the same pipeline and release: use them first so a demo never waits
 // on a server rebuild. ?fresh=1 always asks the backend.
-const preferSaved = () => !params().has("fresh");
+export const strictFresh = () => params().has("fresh");
+const preferSaved = () => !strictFresh();
 export const BAKE_FOV = 0.1;   // every saved bake is a 0.1° field
 const POLL_MS = 1000;
 const TIMEOUT_MS = 45000;      // one request (a cold container can take a while to wake); long builds are jobs
@@ -43,20 +44,49 @@ export class ApiError extends Error {
 export const isAnswer = (e) => e.name === "AbortError" || ["bad_request", "not_found", "invalid_response"].includes(e.code);
 
 const aborted = (signal) => { if (signal?.aborted) throw new DOMException("Cancelled", "AbortError"); };
-const withTimeout = (signal, ms = TIMEOUT_MS) => (AbortSignal.any && AbortSignal.timeout
-  ? AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(ms)]) : signal);
+// Explicit cleanup also supports browsers without AbortSignal.any/timeout.
+async function timedFetch(url, signal, ms = TIMEOUT_MS) {
+  aborted(signal);
+  const controller = new AbortController();
+  const cancel = () => controller.abort(signal.reason);
+  signal?.addEventListener("abort", cancel, { once: true });
+  const timer = setTimeout(() => controller.abort(new DOMException("Request timed out", "TimeoutError")), ms);
+  try { return await fetch(url, { signal: controller.signal }); }
+  finally { clearTimeout(timer); signal?.removeEventListener("abort", cancel); }
+}
+
+async function readBody(response, signal, maxBytes = 64 * 1024 * 1024) {
+  aborted(signal);
+  const reader=response.body?.getReader();
+  let timer, cancel;
+  const deadline=new Promise((_,reject)=>{
+    timer=setTimeout(()=>{reader?.cancel().catch(()=>{});reject(new ApiError("The data transfer stalled. Please retry."));},TIMEOUT_MS);
+    cancel=()=>{reader?.cancel().catch(()=>{});reject(new DOMException("Cancelled","AbortError"));};
+    signal?.addEventListener('abort',cancel,{once:true});
+  });
+  try {
+    return await Promise.race([(async()=>{
+      if(!reader) {const bytes=new Uint8Array(await response.arrayBuffer());if(bytes.length>maxBytes) throw new ApiError("The data response is too large.","invalid_response");return bytes;}
+      const chunks=[];let total=0;
+      for(;;) {const {done,value}=await reader.read();if(done) break;total+=value.byteLength;
+        if(total>maxBytes) {await reader.cancel();throw new ApiError("The data response is too large. Choose a smaller field of view.","invalid_response");}chunks.push(value);}
+      aborted(signal);
+      const bytes=new Uint8Array(total);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length;}return bytes;
+    })(),deadline]);
+  } finally {clearTimeout(timer);signal?.removeEventListener('abort',cancel);}
+}
 
 async function fetchJSON(url, signal) {
   aborted(signal);
   let res;
-  try { res = await fetch(url, { signal: withTimeout(signal) }); }
+  try { res = await timedFetch(url, signal); }
   catch (e) {
     if (signal?.aborted) throw new DOMException("Cancelled", "AbortError");
     throw new ApiError(e.name === "TimeoutError" ? "The data service took too long to respond. Please retry." : "The data service is unavailable.");
   }
   let body;
-  try { body = await res.json(); }
-  catch { if (res.ok) throw new ApiError("The data service returned an unreadable response. Please retry.", "invalid_response"); body = {}; }
+  try { body = JSON.parse(new TextDecoder().decode(await readBody(res,signal))); }
+  catch (e) { if(e instanceof ApiError || e.name === "AbortError") throw e; if (res.ok) throw new ApiError("The data service returned an unreadable response. Please retry.", "invalid_response"); body = {}; }
   if (!res.ok) throw new ApiError(body.message || `No result is available (HTTP ${res.status}).`, body.error || (res.status === 404 ? "not_found" : "upstream_unavailable"), res.status);
   return { status: res.status, body };
 }
@@ -64,8 +94,9 @@ const getJSON = async (url, signal) => (await fetchJSON(url, signal)).body;
 
 const sleep = (ms, signal) => new Promise((resolve, reject) => {
   aborted(signal);
-  const t = setTimeout(resolve, ms);
-  signal?.addEventListener("abort", () => { clearTimeout(t); reject(new DOMException("Cancelled", "AbortError")); }, { once: true });
+  const cancel = () => { clearTimeout(t); reject(new DOMException("Cancelled", "AbortError")); };
+  const t = setTimeout(() => { signal?.removeEventListener("abort", cancel); resolve(); }, ms);
+  signal?.addEventListener("abort", cancel, { once: true });
 });
 
 const liveURL = (endpoint, query) => `${API_BASE}/api/${endpoint}?${new URLSearchParams(clean(query))}`;
@@ -113,13 +144,15 @@ async function call(endpoint, query, { preset, files = [`${endpoint}.json`], acc
   let liveError = null;
   if (!savedOnly) {
     try {
-      return tag(await (live ? live() : getJSON(liveURL(endpoint, query), signal)), "live", "Live SPHEREx data");
+      const data = await (live ? live() : getJSON(liveURL(endpoint, query), signal));
+      return tag(data, "live", data?.retrieval?.kind === "built" ? "Built from archive observations" : "Backend SPHEREx observations");
     } catch (e) {
       if (isAnswer(e)) throw e;
       liveError = e;
       console.warn(`/api/${endpoint} failed:`, e.message);
     }
   }
+  if (strictFresh() && !savedOnly && liveError) throw liveError;
   const saved = await trySaved(savedOnly);
   if (saved) return saved;
   if (savedOnly || !liveError) throw new ApiError("No saved observations match this request. A live backend is needed for it.", "not_found");
@@ -128,28 +161,30 @@ async function call(endpoint, query, { preset, files = [`${endpoint}.json`], acc
 }
 
 // `data` and `noise` in a frame may be a URL instead of an inline array (see docs/API.md).
-async function loadArray(ref, signal) {
+async function loadArray(ref, signal, expected) {
   if (typeof ref !== "string") return ref;
   aborted(signal);
-  const res = await fetch(ref, { signal: withTimeout(signal, 30000) });
+  const res = await timedFetch(ref, signal, 30000);
   if (!res.ok) throw new ApiError(`An image or noise-map file is unavailable (HTTP ${res.status}). Please retry.`, "invalid_response", res.status);
+  if (Number(res.headers?.get("content-length")) > MAX_PIXELS * 4) throw new ApiError("The image file exceeds the supported size.", "invalid_response");
   if (ref.split("?")[0].endsWith(".bin")) {
-    const buf = await res.arrayBuffer();
-    if (buf.byteLength % 4) throw new ApiError("An image file has an invalid size.", "invalid_response");
+    const buf = (await readBody(res,signal,MAX_PIXELS*4)).buffer;
+    if (buf.byteLength > MAX_PIXELS * 4 || buf.byteLength % 4 || (expected && buf.byteLength !== expected * 4)) throw new ApiError("An image file has an invalid size.", "invalid_response");
     const view = new DataView(buf);   // little-endian float32, whatever the machine
     const arr = Array.from({ length: buf.byteLength / 4 }, (_, i) => view.getFloat32(i * 4, true));
     return Array.from(arr, (v) => (Number.isFinite(v) ? v : null));
   }
-  return res.json();
+  return JSON.parse(new TextDecoder().decode(await readBody(res,signal,MAX_PIXELS*24)));
 }
 
 async function inlineFrameData(resp, signal) {
+  validateEnvelope(resp);
   await Promise.all(resp.frames.map(async (f) => {
-    f.data = await loadArray(f.data, signal);
+    f.data = await loadArray(f.data, signal, resp.wcs.width * resp.wcs.height);
     // the noise map is optional: without it the σ-change view is unavailable, the rest still works
     try {
-      f.noise = f.noise ? await loadArray(f.noise, signal) : null;
-      if (f.noise && f.noise.length !== f.data.length) f.noise = null;
+      f.noise = f.noise ? await loadArray(f.noise, signal, resp.wcs.width * resp.wcs.height) : null;
+      if (f.noise) {validatePixels(f.noise,f.data.length);f.noise=f.noise.map(v=>v !== null && v > 0 ? v : null);}
     } catch (e) { if (e.name === "AbortError") throw e; f.noise = null; }
   }));
   return resp;
@@ -157,13 +192,45 @@ async function inlineFrameData(resp, signal) {
 
 /** Cube channel images: `data` (all passes) or `frames[].data` (per_pass=1). */
 async function inlineCubeData(resp, signal) {
-  const jobs = [];
-  for (const ch of resp.channels || []) {
-    if (ch.data) jobs.push(loadArray(ch.data, signal).then((a) => { ch.data = a; }));
-    for (const f of ch.frames || []) jobs.push(loadArray(f.data, signal).then((a) => { f.data = a; }));
+  validateWCS(resp?.wcs);
+  if (!Array.isArray(resp.channels) || resp.channels.length > 17 || !/^D[1-6]$/.test(resp.det)) throw new ApiError("Invalid channel metadata.", "invalid_response");
+  if(!resp.channels.length) throw new ApiError("No spectral channels are available for this region.","not_found");
+  const n = resp.wcs.width * resp.wcs.height;
+  const seen = new Set();
+  if(resp.channels.reduce((sum,ch)=>sum+(resp.per_pass ? ch?.frames?.length || 0 : 1),0)*n > 16*MAX_PIXELS) throw new ApiError("This spectral cube is too large for the browser. Choose a smaller field of view.","invalid_response");
+  for (const ch of resp.channels) {
+    if (!ch || !new RegExp(`^${resp.det}C(0[1-9]|1[0-7])$`).test(ch.channel) || seen.has(ch.channel) || !Number.isFinite(ch.lam_um) || ch.lam_um <= 0)
+      throw new ApiError("Invalid or repeated spectral channel.", "invalid_response");
+    seen.add(ch.channel);
+    if (resp.per_pass && (!Array.isArray(ch.frames) || ch.frames.length > MAX_FRAMES)) throw new ApiError("Invalid channel passes.", "invalid_response");
+    const parts = resp.per_pass ? ch.frames : [ch];
+    for (const f of parts) {
+      if (!f || (resp.per_pass && (!Number.isFinite(f.mjd_mean) || typeof f.epoch_label !== "string"))) throw new ApiError("Invalid channel time metadata.", "invalid_response");
+      f.data = await loadArray(f.data, signal, n);
+      validatePixels(f.data, n);
+    }
   }
-  await Promise.all(jobs);
   return resp;
+}
+
+const MAX_PIXELS = 1024 * 1024;
+const MAX_FRAMES = 200;
+function validateWCS(wcs) {
+  if (!wcs || !Number.isInteger(wcs.width) || !Number.isInteger(wcs.height) || wcs.width < 1 || wcs.height < 1
+    || wcs.width * wcs.height > MAX_PIXELS
+    || !Number.isFinite(wcs.center_ra) || wcs.center_ra < 0 || wcs.center_ra >= 360 || !Number.isFinite(wcs.center_dec) || Math.abs(wcs.center_dec) > 90
+    || !Number.isFinite(wcs.pixel_scale_arcsec) || wcs.pixel_scale_arcsec <= 0) throw new ApiError("The observations have missing or invalid sky coordinates or dimensions.", "invalid_response");
+}
+export function validateEnvelope(response) {
+  validateWCS(response?.wcs);
+  if (!Array.isArray(response.frames) || response.frames.length > MAX_FRAMES || (Array.isArray(response.frames) && response.frames.length * response.wcs.width * response.wcs.height > 16 * MAX_PIXELS)) throw new ApiError("The observations have invalid frame metadata.", "invalid_response");
+  if (!response.frames.length) throw new ApiError("No observation periods are available for this region and band. Try another band or a nearby region.", "not_found");
+  for (const f of response.frames) if (!f || typeof f !== "object" || !(Array.isArray(f.data) || typeof f.data === "string")) throw new ApiError("An observation has invalid image metadata.", "invalid_response");
+  return response;
+}
+function validatePixels(data, n) {
+  if (!Array.isArray(data) || data.length !== n || data.some(v => v !== null && (typeof v !== "number" || !Number.isFinite(v))))
+    throw new ApiError("An image contains invalid pixel values or dimensions.", "invalid_response");
 }
 
 /**
@@ -171,11 +238,8 @@ async function inlineCubeData(resp, signal) {
  * times, at least one usable pixel. Sorts frames by observation time.
  */
 export function validateFrames(response) {
-  const wcs = response?.wcs;
-  if (!wcs || !Number.isInteger(wcs.width) || !Number.isInteger(wcs.height) || wcs.width < 1 || wcs.height < 1
-    || !Number.isFinite(wcs.center_ra) || wcs.center_ra < 0 || wcs.center_ra >= 360 || !Number.isFinite(wcs.center_dec) || Math.abs(wcs.center_dec) > 90
-    || !Number.isFinite(wcs.pixel_scale_arcsec) || wcs.pixel_scale_arcsec <= 0) throw new ApiError("The observations have missing or invalid sky coordinates.", "invalid_response");
-  if (!Array.isArray(response.frames) || !response.frames.length) throw new ApiError("No observation periods are available for this region and band. Try another band or a nearby region.", "not_found");
+  validateEnvelope(response);
+  const wcs = response.wcs;
   for (const f of response.frames) {
     if (!f || typeof f !== "object" || (f.mjd_mean != null && !Number.isFinite(f.mjd_mean))) throw new ApiError("An observation has missing or invalid metadata.", "invalid_response");
     if (!Array.isArray(f.data) || f.data.length !== wcs.width * wcs.height || f.width !== wcs.width || f.height !== wcs.height
@@ -191,21 +255,39 @@ export function validateFrames(response) {
  * Ask for a product with async=1. 200 = cached, use it. 202 = a job: poll its status_url every second,
  * reporting progress, until done (then fetch result.result_url) or error.
  */
-async function runJob(url, { onProgress = () => {}, signal } = {}) {
+async function runJob(url, { onProgress = () => {}, signal, recoveryAttempt = false } = {}) {
   const sep = url.includes("?") ? "&" : "?";
   const first = await fetchJSON(`${url}${sep}async=1`, signal);
   if (first.status !== 202) return first.body;
   let job = first.body;
+  const started = Date.now();
+  let changed = started, signature = "", polls = 0, recovered = false;
   const statusURL = job.status_url || `${API_BASE}/api/jobs/${job.job_id}`;
+  const safeURL = (value) => { try { return new URL(value, API_BASE).origin === new URL(API_BASE).origin; } catch { return false; } };
+  if (!safeURL(statusURL)) throw new ApiError("Invalid job status URL.", "invalid_response");
   for (;;) {
+    if (!job || !["queued", "running", "done", "error"].includes(job.state)) throw new ApiError("Invalid processing job response.", "invalid_response");
+    const next = JSON.stringify([job.state, job.stage, job.done, job.total]);
+    if (next !== signature) { changed = Date.now(); signature = next; }
     onProgress(job);
     if (job.state === "done") {
-      if (!job.result?.result_url) throw new ApiError("The finished job has no result URL.", "invalid_response");
-      return getJSON(job.result.result_url, signal);
+      if (!job.result?.result_url || !safeURL(job.result.result_url)) throw new ApiError("The finished job has no valid result URL.", "invalid_response");
+      const data = await getJSON(job.result.result_url, signal);
+      if (job.result.retrieval) data.retrieval = job.result.retrieval;
+      return data;
     }
-    if (job.state === "error") throw new ApiError(job.message || "The backend could not build this product.", job.error || "upstream_unavailable");
-    await sleep(POLL_MS, signal);
-    job = await getJSON(statusURL, signal);
+    if (job.state === "error") throw new ApiError(job.message || "The backend could not build this product. Repeat the search to resume.", job.error || "upstream_unavailable");
+    if (Date.now() - started > 20 * 60 * 1000 || Date.now() - changed > 5 * 60 * 1000)
+      throw new ApiError("Processing has stopped reporting progress. Retry this search to resume from cached downloads.", "stalled");
+    await sleep(polls++ < 10 ? POLL_MS : 3000, signal);
+    try { job = await getJSON(statusURL, signal); }
+    catch (e) {
+      if (e.status !== 404 || recovered || recoveryAttempt) throw e;
+      recovered = true;
+      const retry = await fetchJSON(`${url}${sep}async=1`, signal);
+      if (retry.status !== 202) return retry.body;
+      return runJob(url, { onProgress, signal, recoveryAttempt: true });
+    }
   }
 }
 
@@ -217,14 +299,18 @@ export const api = {
 
   /** Frames for one band. Uses the async job flow so cold positions show progress instead of hanging. */
   frames: (q, { preset, onProgress, signal, savedOnly } = {}) => {
-    const query = { ra: q.ra, dec: q.dec, fov: q.fov, band: q.band, matched: q.matched ? 1 : undefined };
+    const query = { ra: q.ra, dec: q.dec, fov: q.fov, band: q.band, matched: q.matched ? 1 : undefined, retry_missing:q.retryMissing ? 1 : undefined };
     return call("frames", query, {
       preset, signal, savedOnly,
       live: () => runJob(liveURL("frames", query), { onProgress, signal }),
       files: [q.matched ? `frames_matched_${q.band}.json` : "frames.json"],
       // a preset bake covers one field, band and FOV: only use it when it matches the request exactly
       accept: (d) => matchesSavedField(d, q) && !!d.matched === !!q.matched,
-    }).then((r) => inlineFrameData(r, signal)).then(validateFrames);
+    }).then((r) => {
+      validateEnvelope(r);
+      if(!isDemo() && (!matchesSavedField(r,q) || !!r.matched !== !!q.matched)) throw new ApiError("The returned images do not match the requested coordinates, band or field of view.","invalid_response");
+      return inlineFrameData(r,signal);
+    }).then(validateFrames);
   },
 
   // the exposures and overlay bakes don't record their field: the app only names a preset for its exact centre,

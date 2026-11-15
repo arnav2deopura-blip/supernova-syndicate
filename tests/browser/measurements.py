@@ -3,7 +3,7 @@ import os
 from playwright.sync_api import sync_playwright
 BASE=os.environ.get('SPHEREX_PREVIEW_URL','http://localhost:5600')
 with sync_playwright() as p:
- b=p.chromium.launch(executable_path='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless=True)
+ b=p.chromium.launch(executable_path=os.environ.get('PLAYWRIGHT_CHROMIUM_EXECUTABLE'),headless=True)
  page=b.new_page(viewport={'width':1440,'height':1000});page.set_default_timeout(30000)
  errors=[];page.on('pageerror',lambda e:errors.append(e.stack))
  def mark(text): print('PASS',text,flush=True)

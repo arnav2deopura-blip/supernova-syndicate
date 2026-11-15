@@ -1,0 +1,23 @@
+name: prepare reviewed SPHEREx index refresh
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r backend/requirements.txt
+      - run: python scripts/build_coarse_index.py 1
+        env:
+          SPHEREX_CACHE_DIR: ${{ runner.temp }}/archive-cache
+      - run: python -m pytest -q
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reviewed-index-candidate
+          path: backend/data/coarse_index.json.gz

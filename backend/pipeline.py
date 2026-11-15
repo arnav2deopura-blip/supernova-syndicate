@@ -26,6 +26,10 @@ from .image_alignment import reproject_to, target_wcs, to_display_rows
 Progress = Optional[Callable[[str, int, int], None]]
 
 
+class RequestTooLarge(ValueError):
+    """Estimated native-image working set exceeds the per-job budget."""
+
+
 class NoCoverage(LookupError):
     """No SPHEREx exposure covers the requested position/band."""
 
@@ -35,6 +39,8 @@ class FrameProduct:
     meta: dict                 # FramesResponse fields, minus frame data
     arrays: list[np.ndarray]   # one float32 (height, width) array per frame, row 0 = north
     noise: Optional[list[np.ndarray]] = None   # 1-sigma per pixel, same layout (calibrated, see calibrate_noise)
+
+    coverage: Optional[list[np.ndarray]] = None
 
 
 def calibrate_noise(arrays: list[np.ndarray], noise: list[np.ndarray]) -> tuple[list[np.ndarray], Optional[list[float]]]:
@@ -180,6 +186,9 @@ def load_stamps(ra: float, dec: float, fov: float, band: str, progress: Progress
     records = [r for r in all_records if r.detector == det]
     if not records:
         raise NoCoverage(f"No SPHEREx {band} exposures cover RA {ra:.5f}, Dec {dec:.5f} in {cfg['release_tag']}.")
+    pixels=len(records)*spherex_client.stamp_size_px(fov)**2
+    if pixels > cfg.get('limits',{}).get('max_native_pixels',16_000_000):
+        raise RequestTooLarge('This field requires too many large cutouts for one job. Choose a smaller field of view (for example 0.04 degrees).')
     stamps: list[PreparedStamp] = []
     for _, path in spherex_client.fetch_stamps(records, ra, dec, fov, progress=progress):
         with fits.open(path) as h:
@@ -203,8 +212,8 @@ def _details_key(ra: float, dec: float, band: str) -> str:
 
 def _save_details(ra: float, dec: float, band: str, stamps: list[PreparedStamp]) -> None:
     cache.put_json(_details_key(ra, dec, band), [
-        {"obs_id": s.obs_id, "detector": s.detector, "mjd": s.mjd, "lam_um": round(s.lam_um, 4),
-         "bw_um": round(s.bw_um, 4), "target_flags": s.target_flags, "masked_fraction": round(s.masked_fraction, 4)}
+        {"obs_id": s.obs_id, "detector": s.detector, "mjd": s.mjd, "lam_um": round(s.lam_um, 4) if np.isfinite(s.lam_um) else None,
+         "bw_um": round(s.bw_um, 4) if np.isfinite(s.bw_um) else None, "target_flags": s.target_flags if s.target_in_frame else None, "masked_fraction": round(s.masked_fraction, 4)}
         for s in stamps])
 
 
@@ -236,16 +245,18 @@ def coadd_epochs(stamps: list[PreparedStamp], ra: float, dec: float, fov: float,
     for s, e in zip(stamps, labels):
         by_epoch[e].append(s)
 
-    frames, arrays, noise = [], [], []
+    frames, arrays, noise, coverage = [], [], [], []
     for n, e in enumerate(sorted(by_epoch)):
         group = by_epoch[e]
         images = [reproject_to(s.image, s.wcs, out_wcs) for s in group]
         img, err, nused = coadd_clipped(images, [s.bkg_rms for s in group])
+        if not np.isfinite(img).any(): continue
+        coverage.append(to_display_rows(nused.astype(np.float32)))
         noise.append(to_display_rows(err))
         if progress:
             progress("coadd", n + 1, len(by_epoch))
         mjds = [s.mjd for s in group]
-        lams = sorted(round(s.lam_um, 4) for s in group)
+        lams = sorted(round(s.lam_um, 4) for s in group if np.isfinite(s.lam_um))
         target_flags = sorted({f for s in group for f in s.target_flags})
         arrays.append(to_display_rows(img))
         frames.append({
@@ -258,7 +269,7 @@ def coadd_epochs(stamps: list[PreparedStamp], ra: float, dec: float, fov: float,
             "height": h,
             "flag_fraction": round(float(np.mean(~np.isfinite(img))), 4),
             "lam_um": lams,
-            "lam_eff_um": round(float(np.mean(lams)), 4),
+            "lam_eff_um": round(float(np.mean(lams)), 4) if lams else None,
             "target_flags": target_flags,
             "obs_ids": [s.obs_id for s in group],
         })
@@ -270,7 +281,11 @@ def coadd_epochs(stamps: list[PreparedStamp], ra: float, dec: float, fov: float,
                 "pixel_scale_arcsec": cfg["pixel_scale_arcsec"] / cfg["oversample"], "width": w, "height": h},
         "frames": frames,
     }
+    from .provenance import manifest
+    meta['provenance']=manifest()
+    report=cache.get_json(cache.cache_key('retrieval',ra,dec,fov,str(int(band[1])),spherex_client.data_version())) or {}
+    meta['completeness']={**report,'selection_policy':'bounded per-detector temporal sampling; not guaranteed exhaustive', 'per_detector_per_window':cfg['archive'].get('scan_per_det_window')}
     noise, k = calibrate_noise(arrays, noise)
     for f, kf in zip(frames, k or []):
         f["noise_scale"] = kf
-    return FrameProduct(meta, arrays, noise)
+    return FrameProduct(meta, arrays, noise, coverage)

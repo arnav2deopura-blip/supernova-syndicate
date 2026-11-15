@@ -230,6 +230,8 @@ def photometry_table(stamps: list[PreparedStamp], track: Track, bins: Optional[l
     r_deblend = DEBLEND_RADIUS_PX * get_config()["pixel_scale_arcsec"]
     for s, e in zip(stamps, labels):
         ra, dec = track.at(s.mjd)
+        xp,yp=(float(v) for v in s.wcs.all_world2pix(ra,dec,0))
+        if not (0 <= xp < s.image.shape[1] and 0 <= yp < s.image.shape[0]): continue
         others = ([(a, b) for _, a, b in neighbours_at(track, s.mjd, neighbours, r_deblend)]
                   if deblend and neighbours else None)
         p = measure(s, ra, dec, free=free, others=others)

@@ -350,13 +350,14 @@ def d1_pixel(sample_ra, sample_dec, pc_arcsec, ra, dec, crpix=(1020.5, 1020.5)):
     return cr[:, 0] - 1 + dx, cr[:, 1] - 1 + dy
 
 
-def predict_detectors(x1, y1, y_margin: Optional[float] = None) -> list[set[int]]:
+def predict_detectors(x1, y1, y_margin: Optional[float] = None, region_margin: float = 0) -> list[set[int]]:
     """Which SWIR detectors (1-3) can a target at D1 pixel (x1, y1) land on, for any exposure of the
     observation? Boxes come from config archive.focal_plane (detector outlines in D1 pixels, measured from
     real headers). The ~4 exposures of an observation step ~115 px along y; y_margin covers that."""
     fp = get_config()["archive"]["focal_plane"]
     ym = fp["y_margin_px"] if y_margin is None else y_margin
-    xm = fp["x_margin_px"]
+    xm = fp["x_margin_px"] + region_margin
+    ym += region_margin
     x1, y1 = np.atleast_1d(x1), np.atleast_1d(y1)
     out = [set() for _ in range(len(x1))]
     for det in (1, 2, 3):
@@ -368,7 +369,7 @@ def predict_detectors(x1, y1, y_margin: Optional[float] = None) -> list[set[int]
 
 
 def candidate_plan(ra: float, dec: float, radius_deg: float, window_days: Optional[float] = None,
-                   max_total: Optional[int] = None, per_det_window: Optional[int] = None
+                   max_total: Optional[int] = None, per_det_window: Optional[int] = None, region_margin: float = 0
                    ) -> dict[str, Optional[dict[int, Optional[set[int]]]]]:
     """Folder -> {observation number -> detectors to header-scan (None = D1-D3)}; folder -> None = scan it all.
 
@@ -402,7 +403,7 @@ def candidate_plan(ra: float, dec: float, radius_deg: float, window_days: Option
         px, py = d1_pixel(np.array([x["ra"] for x in xs]), np.array([x["dec"] for x in xs]),
                           np.array([x["pc"] for x in xs]), ra, dec,
                           np.array([x.get("crpix", (1020.5, 1020.5)) for x in xs]))
-        dets = predict_detectors(px, py)
+        dets = predict_detectors(px, py, region_margin=region_margin)
         cells: dict[tuple[int, int], list] = {}
         for x, d, dd in zip(xs, [n[1] for n in near], dets):
             for det in dd:
@@ -465,8 +466,8 @@ def find_exposures(ra: float, dec: float, progress: Progress = None, margin_px: 
     pixel position is checked later, when the stamp is cut.
     """
     cfg = get_config()["archive"]
-    plan = candidate_plan(ra, dec, cfg.get("coarse_radius_deg", 12.0), window_days=cfg.get("scan_window_days"),
-                          max_total=cfg.get("max_candidate_obs"), per_det_window=cfg.get("scan_per_det_window"))
+    plan = candidate_plan(ra, dec, cfg.get("coarse_radius_deg", 12.0)+margin_px*get_config()["pixel_scale_arcsec"]/3600, window_days=cfg.get("scan_window_days"),
+                          max_total=cfg.get("max_candidate_obs"), per_det_window=cfg.get("scan_per_det_window"),region_margin=margin_px)
     folders = sorted(plan)
     found: list[S3Exposure] = []
     for i, wf in enumerate(folders):
@@ -482,7 +483,7 @@ def find_exposures(ra: float, dec: float, progress: Progress = None, margin_px: 
             d1 = [k for k in detector_keys(wf, 1) if parse_name(k)["exp"] == 1
                   and (unknown is None or int(parse_name(k)["obs"]) in unknown)]
             for s in _summaries(d1, full_wcs=False):
-                if separation_deg(ra, dec, s["ra"], s["dec"]) < cfg.get("fine_radius_deg", 11.0):
+                if separation_deg(ra, dec, s["ra"], s["dec"]) < cfg.get("fine_radius_deg", 11.0)+margin_px*get_config()["pixel_scale_arcsec"]/3600:
                     near_obs[parse_name(s["key"])["obs"]] = {1, 2, 3}
         if not near_obs:
             continue
@@ -544,7 +545,7 @@ def cut_stamp(key: str, ra: float, dec: float, size_px: int) -> Optional[fits.HD
         hdr = h["IMAGE"].header
         ny, nx = h["IMAGE"].shape
         x, y = WCS(hdr).all_world2pix(ra, dec, 0)
-        if not (0 <= x < nx and 0 <= y < ny):
+        if not (-size_px/2 <= x < nx+size_px/2 and -size_px/2 <= y < ny+size_px/2):
             return None
         size = min(size_px, nx, ny)
         x0 = int(np.clip(round(float(x)) - size // 2, 0, nx - size))

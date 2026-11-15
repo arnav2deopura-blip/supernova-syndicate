@@ -100,7 +100,7 @@ export { download };
 export function eventReport(e, ctx) {
   const { target, frames, A, B, matched, band, passes, release } = ctx;
   return {
-    tool: "SPHEREx Sky Explorer", generated: new Date().toISOString(), release: release || null,
+    tool: "Sphere Shift", generated: new Date().toISOString(), release: release || null,
     target: target && { label: target.label, ra: target.ra, dec: target.dec },
     band, matched, compared: { a: A.epoch_label, b: B.epoch_label },
     event: {

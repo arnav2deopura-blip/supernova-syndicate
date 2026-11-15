@@ -1,4 +1,4 @@
-# SPHEREx Sky Explorer
+# Sphere Shift
 
 **A blink comparator for a 102-colour sky.** Type coordinates, watch the infrared sky change between SPHEREx passes, and spot stars that move or flicker.
 
@@ -28,7 +28,7 @@ All three end in the same comparison viewer (blink, difference, sum, Gaia overla
 
 | Mode | How | Backend |
 |---|---|---|
-| **Explore the sky** | Pan and zoom the SPHEREx DR1 all-sky map ([IRSA HiPS cube](https://irsa.ipac.caltech.edu/data/hips/SPHEREx/spherex_allsky_cube), via Aladin Lite), with a slider over all 102 channels. Click to drop a box of the chosen FOV, or Shift+drag (or "Draw box" on touch) to draw one, up to 0.5°. A coverage check shows the exposures and passes before you compare | `/api/exposures`, then `/api/frames` |
+| **Explore the sky** | Pan and zoom the SPHEREx DR1 all-sky map ([IRSA HiPS cube](https://irsa.ipac.caltech.edu/data/hips/SPHEREx/spherex_allsky_cube), via Aladin Lite), with a slider over the available HiPS spectral slices. Click to drop a box of the chosen FOV, or Shift+drag (or "Draw box" on touch) to draw one, up to 0.5°. A coverage check shows the exposures and passes before you compare | `/api/exposures`, then `/api/frames` |
 | **Object name** | Type a name (recent searches and the test targets are suggested). It resolves through SIMBAD and is propagated to now; the proper motion is used for the spectrum | `/api/resolve`, then `/api/frames` |
 | **Coordinates** | RA/Dec in decimal degrees or sexagesimal (`17:57:47 +04:46:14`), or both pasted into one box | `/api/frames` |
 
@@ -127,7 +127,7 @@ New SPHEREx release? A weekly GitHub Action opens an issue when one appears; the
 
 ## Validation
 
-See [docs/VALIDATION.md](docs/VALIDATION.md) for results on all five test targets.
+Current verification and limits: [docs/RELEASE_READINESS.md](docs/RELEASE_READINESS.md). Real cold-cache builds: [docs/LIVE_VALIDATION.json](docs/LIVE_VALIDATION.json). Earlier measurement studies are archived in [docs/VALIDATION.md](docs/VALIDATION.md); their numbers are not current release certification.
 
 ## Limits
 
@@ -141,11 +141,11 @@ Data credits and DOIs: [CITATION.md](CITATION.md). API: [docs/API.md](docs/API.m
 
 ## AI use disclosure
 
-We used Anthropic's Claude to help plan the project and scaffold this repository. _TODO: list every AI tool used and how, before submission._
+Anthropic Claude helped plan the project and scaffold the repository. OpenAI Codex assisted with frontend implementation, backend reliability fixes, scientific guardrails, documentation, and automated/manual browser audits. AI-generated changes are checked by the repository suites; this does not independently validate every scientific inference.
 
 ## Team
 
-Sphere Shift. _TODO: names and roles (A Data/Backend, B Science, C Frontend/Ship)._
+Sphere Shift: **Chakshu Parnam, Arnav Deopura, and Zaid Khan**.
 
 Licence: MIT.
 
@@ -157,3 +157,27 @@ port 5600, optional Playwright tooling and Google Chrome installed, run
 `python tests/browser/acceptance.py` and `python tests/browser/measurements.py`.
 These exercise actual saved scientific products, live map selection, exports,
 channel controls and failure recovery; they do not replace a deployed-host smoke test.
+
+
+### Comparison and research behavior
+
+Play passes shows actual dated images. Smooth blends adjacent images for presentation only.
+Side by side uses the same WCS, brightness stretch and zoom for two selected passes.
+Matched wavelengths apply at the field centre: off-centre brightness residuals remain exploratory.
+The Advanced drawer loads optional analyses once per target and exports a research manifest.
+“Masked %” describes missing output pixels, separately from contamination flags at the target.
+Invalid parallax/errors, mixed-channel magnitudes and unvalidated colour temperatures are withheld.
+
+Test targets normally load explicitly labeled saved observations for speed. Add `?fresh=1` to
+require the backend and disable saved fallback. The badge distinguishes a backend cache hit from
+a new archive build. An empty-cache run of `scripts/validate_live.py` tests retrieval independently
+of the saved files. Public archive availability and sampling limits are reported, not hidden.
+
+Python 3.12+ is required for the backend. `scripts/run_local.sh --backend` installs the pinned
+requirements even into an existing venv, loads `.env`, and checks server readiness. Install
+`scripts/requirements-figures.txt` only for optional plotting scripts.
+
+Dense fields can exceed the per-job image budget even below the maximum FOV. The
+service checks this before downloading cutouts and offers a smaller field; it does
+not attempt an unbounded allocation. Research fits combining detectors have the same
+working-set limit.
