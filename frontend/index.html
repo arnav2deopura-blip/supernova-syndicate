@@ -1,92 +1,80 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SPHEREx Sky Explorer</title>
-  <meta name="description" content="Blink SPHEREx infrared sky passes to find stars that move or change.">
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SPHEREx Sky Explorer · Find what changed</title>
+  <meta name="description" content="Explore the infrared sky, compare observations, and investigate stars that move or change brightness.">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <header>
-    <h1>SPHEREx Sky Explorer</h1>
-    <p class="tagline">A blink comparator for a 102-colour sky</p>
+  <a class="skip-link" href="#workspace">Skip to sky explorer</a>
+  <header class="site-header">
+    <a class="brand" href="./" aria-label="SPHEREx Sky Explorer home"><span class="brand-mark" aria-hidden="true">✳</span><span>SPHEREx <strong>Sky Explorer</strong></span></a>
+    <div class="header-right"><span class="project-label">SUPERNOVA SYNDICATE</span><button id="help-tour" class="quiet" type="button">Take a tour ↗</button></div>
   </header>
-
-  <div id="banner" class="banner" hidden></div>
-
-  <main>
-    <section class="controls" aria-label="Target">
-      <form id="target-form">
-        <label>Name <input id="name" placeholder="Barnard's Star" autocomplete="off"></label>
-        <label>RA <input id="ra" placeholder="269.4486 or 17:57:48" required></label>
-        <label>Dec <input id="dec" placeholder="4.7394 or +04:44:22" required></label>
-        <label>FOV
-          <select id="fov">
-            <option value="0.04">0.04°</option>
-            <option value="0.1" selected>0.1°</option>
-            <option value="0.25">0.25°</option>
-          </select>
-        </label>
-        <label>Band
-          <select id="band">
-            <option>D1</option><option selected>D2</option><option>D3</option>
-            <option>D4</option><option>D5</option><option>D6</option>
-          </select>
-        </label>
-        <button type="submit">Load</button>
+  <main id="workspace">
+    <section class="intro" aria-labelledby="intro-title">
+      <div><p class="eyebrow">THE SKY DOESN’T STAND STILL</p><h1 id="intro-title">Find what <em>changed.</em></h1><p class="intro-copy">A moving point of light. A star that flickers. Compare the infrared sky across time and follow the clues.</p></div>
+      <div class="intro-aside"><span class="orbit-icon" aria-hidden="true">◎</span><p>One patch of sky.<br>Different moments in time.<br><strong>Your next question starts here.</strong></p></div>
+    </section>
+    <section class="search-panel panel" aria-labelledby="search-title">
+      <div class="section-heading"><div><p class="eyebrow">01 / CHOOSE YOUR PATCH OF SKY</p><h2 id="search-title">Where shall we look?</h2></div><span class="helper">New here? Try one of the example targets below.</span></div>
+      <div class="search-tabs" role="tablist" aria-label="Search method">
+        <button id="tab-name" role="tab" aria-selected="true" aria-controls="panel-name" data-search="name" type="button"><span aria-hidden="true">⌕</span> Object name</button>
+        <button id="tab-space" role="tab" aria-selected="false" aria-controls="panel-space" data-search="space" tabindex="-1" type="button"><span aria-hidden="true">◎</span> Free space</button>
+        <button id="tab-coordinates" role="tab" aria-selected="false" aria-controls="panel-coordinates" data-search="coordinates" tabindex="-1" type="button"><span aria-hidden="true">＋</span> Coordinates</button>
+      </div>
+      <form id="target-form" novalidate>
+        <div id="panel-name" class="query-panel" role="tabpanel" aria-labelledby="tab-name">
+          <label for="name">Object name</label><div class="name-row"><input id="name" placeholder="Try Barnard’s Star, RW Aur, or WISE 0855" autocomplete="off" aria-describedby="name-help"><button type="submit" class="primary">Compare this object →</button></div>
+          <p id="name-help" class="helper">Search a recognised astronomical name. We’ll find its coordinates and compare the observations that are available.</p>
+        </div>
+        <div id="panel-coordinates" class="query-panel" role="tabpanel" aria-labelledby="tab-coordinates" hidden>
+          <div class="coordinate-row"><label>Right ascension (RA)<input id="ra" placeholder="269.446074 or 17:57:47.06" autocomplete="off" aria-describedby="coordinate-help"></label><label>Declination (Dec)<input id="dec" placeholder="+4.770711 or +04:46:14.56" autocomplete="off" aria-describedby="coordinate-help"></label><button type="submit" class="primary">Compare coordinates →</button></div>
+          <p id="coordinate-help" class="helper">RA is the sky’s longitude (0–360°); Dec is its latitude (−90° to +90°). Enter decimal degrees or hours:minutes:seconds for RA and degrees:minutes:seconds for Dec, in ICRS.</p>
+        </div>
+        <div id="panel-space" class="query-panel" role="tabpanel" aria-labelledby="tab-space" hidden>
+          <div class="map-heading"><p>Drag to explore · scroll or pinch to zoom · select a region to compare</p><button id="map-retry" type="button" class="quiet" hidden>Retry sky map</button></div>
+          <div class="map-shell"><div id="sky-map" aria-label="Interactive reference sky map"></div><p id="map-status" role="status">Opening the reference sky…</p></div>
+          <div class="map-actions"><button id="map-select" type="button" disabled>Select a region</button><button id="map-center" type="button" disabled>Use map centre</button><label>Comparison size<select id="map-size"><option value="0.04">0.04° · small</option><option value="0.1" selected>0.10° · standard</option><option value="0.25">0.25° · wide</option><option value="0.5">0.50° · maximum</option></select></label><span id="map-selection" class="helper" aria-live="polite">Choose a region, then compare it.</span><button id="map-compare" type="button" class="primary" disabled>Compare selected sky →</button></div>
+          <p class="helper">Reference map: DSS2 optical imagery via CDS Aladin Lite. It helps you navigate; the comparison below uses SPHEREx infrared observations. The selected rectangle is enclosed by a square cutout, up to 0.5° per side.</p>
+        </div>
+        <div class="query-options"><label>Patch size (field of view)<select id="fov"><option value="0.04">0.04° · close look</option><option value="0.1" selected>0.10° · standard</option><option value="0.25">0.25° · wider view</option><option value="0.5">0.50° · maximum</option></select></label><label>Infrared band<select id="band"><option value="D1">D1 · shortest wavelengths</option><option value="D2" selected>D2</option><option value="D3">D3</option><option value="D4">D4</option><option value="D5">D5</option><option value="D6">D6 · longest wavelengths</option></select></label><p class="helper">Each band sees a different part of infrared light. Comparisons use wavelengths shared across observation periods.</p></div>
       </form>
-      <div class="presets" id="presets" aria-label="Test targets"></div>
+      <div class="preset-row"><span class="eyebrow">START WITH A KNOWN STORY</span><div id="presets" class="presets" aria-label="Example targets"></div></div>
+      <div id="query-error" class="message error" role="alert" hidden></div>
     </section>
-
-    <section class="viewer" aria-label="Viewer">
-      <div class="stage">
-        <canvas id="image" width="48" height="48"></canvas>
-        <canvas id="overlay"></canvas>
-      </div>
-      <div class="player">
-        <button id="play" type="button">Pause</button>
-        <label>Speed <input id="speed" type="range" min="1" max="10" value="3"></label>
-        <span id="frame-label">–</span>
-      </div>
-      <div class="display">
-        <label>Mode
-          <select id="mode">
-            <option value="blink">Blink</option>
-            <option value="diff">Difference (last − first)</option>
-            <option value="sum">Sum</option>
-          </select>
-        </label>
-        <label>Stretch
-          <select id="stretch">
-            <option value="asinh">asinh</option>
-            <option value="linear">linear</option>
-          </select>
-        </label>
-        <label>Colormap
-          <select id="cmap">
-            <option value="gray">gray</option>
-            <option value="inferno">inferno</option>
-            <option value="viridis">viridis</option>
-          </select>
-        </label>
-        <label>Clip % <input id="clip" type="range" min="90" max="100" step="0.1" value="99.5"></label>
-        <label><input id="show-overlay" type="checkbox" checked> Gaia overlay</label>
-      </div>
-    </section>
-
-    <aside class="side">
-      <h2>Frames</h2>
-      <table id="meta"><thead><tr><th>Epoch</th><th>MJD</th><th>Exposures</th><th>Flagged</th></tr></thead><tbody></tbody></table>
-      <h2>Spectrum <small>(click the image)</small></h2>
-      <canvas id="spectrum" width="360" height="200"></canvas>
-    </aside>
+    <div id="banner" class="message" role="status" hidden></div>
+    <div id="loading" class="loading panel" role="status" hidden><span class="spinner" aria-hidden="true"></span><div><strong id="loading-title">Finding observations…</strong><p id="loading-detail">A new region can take 1–10 minutes to prepare. Example targets have saved observations.</p><progress id="load-progress" aria-label="Preparing observations"></progress></div><button id="cancel-load" type="button">Cancel</button></div>
+    <div class="results-grid">
+      <section id="comparison" class="viewer panel" aria-labelledby="comparison-title">
+        <div class="section-heading"><div><p class="eyebrow">02 / LOOK FOR A CHANGE</p><h2 id="comparison-title">Your sky, across time</h2></div><span id="data-source" class="badge">No observations loaded</span></div>
+        <p id="target-summary" class="helper">Choose a target to begin.</p>
+        <div class="stage"><canvas id="image" width="117" height="117" tabindex="0" aria-label="Infrared comparison. Click a pixel to inspect it, or press Enter to inspect the centre."></canvas><canvas id="overlay" aria-hidden="true"></canvas><div id="viewer-empty" class="viewer-empty">Choose a patch of sky<br><span>Its observations will appear here.</span></div><span class="orientation" aria-hidden="true">N ↑<br>E ←</span></div>
+        <div id="comparison-notice" class="message compact" hidden></div>
+        <div class="player"><button id="previous-frame" type="button" aria-label="Previous observation">←</button><button id="play" type="button" class="primary">Pause</button><button id="next-frame" type="button" aria-label="Next observation">→</button><label>Speed <input id="speed" type="range" min="1" max="10" value="3" aria-describedby="speed-value"></label><output id="speed-value">3 frames/s</output><span id="frame-label">—</span></div>
+        <div class="display"><label>Comparison mode<select id="mode"><option value="blink">Blink · alternate observations</option><option value="diff">Difference · last minus first</option><option value="sum">Sum · combine observations</option></select></label><label class="checkbox-label"><input id="show-overlay" type="checkbox"> Show Gaia reference stars</label></div>
+        <p id="mode-help" class="helper mode-help">Blink: watch for a point of light that moves or changes brightness while its neighbours stay steady.</p>
+      </section>
+      <aside class="side panel" aria-labelledby="read-sky-title">
+        <p class="eyebrow">MAKE SENSE OF WHAT YOU SEE</p><h2 id="read-sky-title">Follow the clues.</h2>
+        <div class="clue"><span aria-hidden="true">↗</span><div><h3>Something moved?</h3><p>A star may jump between positions. In Difference mode, look for a bright/dark pair.</p></div></div>
+        <div class="clue"><span aria-hidden="true">◐</span><div><h3>Something flickered?</h3><p>A source may brighten or fade in place. Compare it with nearby stars before drawing a conclusion.</p></div></div>
+        <p class="science-caution">A change is a clue, not a confirmed discovery. Saturation, alignment, noise, or remaining wavelength differences can also leave a signal.</p>
+        <div class="spectrum-heading"><h3>Light across wavelengths</h3><button id="target-spectrum" type="button" class="quiet">Inspect target</button></div>
+        <p class="helper">Click the infrared image to inspect a position. A spectrum shows its brightness at different infrared wavelengths.</p>
+        <canvas id="spectrum" width="440" height="240" role="img" aria-label="Spectrum plot. A text summary appears below."></canvas>
+        <p id="spectrum-status" class="helper" role="status">No spectrum requested.</p><p id="overlay-status" class="helper" role="status"></p>
+      </aside>
+    </div>
+    <details id="advanced" class="advanced panel"><summary><span><span class="eyebrow">FOR A CLOSER INVESTIGATION</span><strong>Advanced analysis</strong></span><span class="summary-hint">Measurements, quality & methods <span aria-hidden="true">＋</span></span></summary>
+      <p class="helper">Inspect the measurements behind the image. Unknown means a value was not supplied or cannot be calculated reliably.</p>
+      <div class="advanced-controls"><label>Brightness stretch<select id="stretch"><option value="asinh">Asinh · reveal faint structure</option><option value="linear">Linear</option></select></label><label>Colour map<select id="cmap"><option value="gray">Grayscale</option><option value="inferno">Inferno</option><option value="viridis">Viridis</option></select></label><label>Upper display percentile<input id="clip" type="range" min="90" max="100" step="0.1" value="99.5"><output id="clip-value">99.5%</output></label></div>
+      <div id="science-details"></div>
+      <div class="table-scroll"><table id="meta"><caption>Observation periods · MJD is Modified Julian Date</caption><thead><tr><th scope="col">Period</th><th scope="col">Dates (UTC)</th><th scope="col">Exposures</th><th scope="col">Masked pixels</th><th scope="col">Target quality</th></tr></thead><tbody><tr><td colspan="5">No observations loaded.</td></tr></tbody></table></div>
+    </details>
   </main>
-
-  <footer>
-    Data: SPHEREx (NASA/IPAC IRSA), Gaia DR3 (ESA). Built for NASA Space Apps 2026 by Supernova Syndicate.
-  </footer>
-
+  <footer><div class="brand footer-brand"><span class="brand-mark" aria-hidden="true">✳</span><span>Small changes. <strong>New questions.</strong></span></div><p>SPHEREx · NASA/IPAC IRSA · Gaia DR3 · ESA<br>Supernova Syndicate / NASA Space Apps Challenge 2026</p><a href="https://irsa.ipac.caltech.edu/Missions/spherex.html" target="_blank" rel="noopener noreferrer">About the data ↗</a></footer>
   <script type="module" src="js/app.js"></script>
 </body>
 </html>
