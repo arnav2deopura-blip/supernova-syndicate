@@ -1,0 +1,21 @@
+{
+  "recorded_utc": "2026-11-15T20:33:49.557125+00:00",
+  "python": {
+    "passed": 144,
+    "warning": "Starlette TestClient/httpx deprecation; no test failures"
+  },
+  "javascript": {
+    "passed": 50
+  },
+  "browser_acceptance": "passed including movie restoration from side-by-side",
+  "deterministic_browser": "passed",
+  "measurement_browser": "passed",
+  "live_browser_evidence": "BROWSER_LIVE_VALIDATION.json",
+  "cold_archive_evidence": "LIVE_VALIDATION.json",
+  "final_processing_replay": "LIVE_VALIDATION_FINAL.json",
+  "native_archive_evidence": "NATIVE_ARCHIVE_VALIDATION.json",
+  "clean_launcher": "passed after clean venv installation on macOS",
+  "git_diff_check": "passed",
+  "remote_linux_ci": "configured; not executed by this local audit",
+  "cloud_deployment": "not performed"
+}

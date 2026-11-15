@@ -1,0 +1,280 @@
+{
+  "generated_utc": "2026-11-15T20:29:27.758343+00:00",
+  "processing": {
+    "release": "dr1+qr3-2026W40",
+    "index_sha256": "e4c05122de6b5bc532aa12a05f1be62adacfd5a5133fd2747d8d03dbec64a237",
+    "processing_sha256": "56795efeec12e9d5bbb9bb3e777e36c7ee96bc12f8b6187424b735400e862c93",
+    "config_sha256": "32a06ebb192a99cea4d2b7288610b086c7c20ea6108d3f75187b40147ecfda64",
+    "runtime_sha256": "8e2a7b9f3960e8ece29fa0e6ae9ddca38e2810c949e298a66aa3742735adc451",
+    "dependencies": {
+      "numpy": "2.5.4",
+      "astropy": "8.0.2",
+      "photutils": "3.1.1",
+      "reproject": "0.21.0",
+      "scipy": "1.18.1",
+      "fastapi": "0.163.1",
+      "pydantic": "2.14.3"
+    },
+    "calibrations": {
+      "spectral_channels.json": "6f2c07ab9a49d422f427271bd65812fe5170cbccd08f4fc6707fd16739783d41",
+      "channel_map.npy.gz": "03686a92cb582319e2b1fcb4a242b1cb8a6591c28422745635beac1f299043df"
+    },
+    "pixel_scale_arcsec": 3.075,
+    "flag_policy": {
+      "display_mask": [
+        "NONFUNC",
+        "MISSING_DATA",
+        "HOT",
+        "COLD",
+        "DICHROIC"
+      ],
+      "photometry_reject": [
+        "TRANSIENT",
+        "OVERFLOW",
+        "SUR_ERROR",
+        "NONLINEAR",
+        "PERSIST",
+        "OUTLIER",
+        "STREAK",
+        "SNOWBALL"
+      ],
+      "contamination": [
+        "GHOST",
+        "GHOST_FPA",
+        "GHOST_EXT",
+        "CROSSTALK",
+        "HALO",
+        "BLOOM"
+      ],
+      "ignore": [
+        "SOURCE",
+        "FULLSAMPLE",
+        "PHANMISS"
+      ]
+    }
+  },
+  "targets": {
+    "barnards-star": {
+      "whole_band": [
+        {
+          "pass": "E1",
+          "exposures": 22,
+          "mjd_start": 60907.96065,
+          "mjd_end": 60917.67461
+        },
+        {
+          "pass": "E2",
+          "exposures": 15,
+          "mjd_start": 61114.10023,
+          "mjd_end": 61121.22887
+        },
+        {
+          "pass": "E3",
+          "exposures": 16,
+          "mjd_start": 61270.86778,
+          "mjd_end": 61305.62869
+        }
+      ],
+      "matched": [
+        {
+          "pass": "E1",
+          "exposures": 8,
+          "mjd_start": 60908.98259,
+          "mjd_end": 60916.65824
+        },
+        {
+          "pass": "E2",
+          "exposures": 8,
+          "mjd_start": 61114.10471,
+          "mjd_end": 61120.55274
+        },
+        {
+          "pass": "E3",
+          "exposures": 10,
+          "mjd_start": 61270.87077,
+          "mjd_end": 61280.16693
+        }
+      ]
+    },
+    "eps-indi-b": {
+      "whole_band": [
+        {
+          "pass": "E1",
+          "exposures": 22,
+          "mjd_start": 60794.06399,
+          "mjd_end": 60815.13187
+        },
+        {
+          "pass": "E2",
+          "exposures": 15,
+          "mjd_start": 60947.30261,
+          "mjd_end": 60983.50422
+        },
+        {
+          "pass": "E3",
+          "exposures": 12,
+          "mjd_start": 61159.16306,
+          "mjd_end": 61164.11762
+        },
+        {
+          "pass": "E4",
+          "exposures": 34,
+          "mjd_start": 61305.22757,
+          "mjd_end": 61311.33729
+        }
+      ],
+      "matched": [
+        {
+          "pass": "E1",
+          "exposures": 4,
+          "mjd_start": 60794.13375,
+          "mjd_end": 60795.08783
+        },
+        {
+          "pass": "E2",
+          "exposures": 4,
+          "mjd_start": 60947.30411,
+          "mjd_end": 60954.22961
+        },
+        {
+          "pass": "E3",
+          "exposures": 5,
+          "mjd_start": 61159.16306,
+          "mjd_end": 61159.56871
+        },
+        {
+          "pass": "E4",
+          "exposures": 8,
+          "mjd_start": 61305.23056,
+          "mjd_end": 61310.79603
+        }
+      ]
+    },
+    "wise-0855": {
+      "whole_band": [
+        {
+          "pass": "E1",
+          "exposures": 3,
+          "mjd_start": 60800.70069,
+          "mjd_end": 60800.8351
+        },
+        {
+          "pass": "E2",
+          "exposures": 21,
+          "mjd_start": 60989.29921,
+          "mjd_end": 61022.0298
+        },
+        {
+          "pass": "E3",
+          "exposures": 13,
+          "mjd_start": 61151.1986,
+          "mjd_end": 61171.09702
+        }
+      ],
+      "matched": [
+        {
+          "pass": "E1",
+          "exposures": 1,
+          "mjd_start": 60800.70069,
+          "mjd_end": 60800.70069
+        },
+        {
+          "pass": "E2",
+          "exposures": 1,
+          "mjd_start": 60993.57939,
+          "mjd_end": 60993.57939
+        },
+        {
+          "pass": "E3",
+          "exposures": 1,
+          "mjd_start": 61171.09702,
+          "mjd_end": 61171.09702
+        }
+      ]
+    },
+    "rw-aur": {
+      "whole_band": [
+        {
+          "pass": "E1",
+          "exposures": 19,
+          "mjd_start": 60926.2758,
+          "mjd_end": 60928.79022
+        },
+        {
+          "pass": "E2",
+          "exposures": 9,
+          "mjd_start": 61100.20604,
+          "mjd_end": 61108.21767
+        },
+        {
+          "pass": "E3",
+          "exposures": 14,
+          "mjd_start": 61293.37914,
+          "mjd_end": 61297.32146
+        }
+      ],
+      "matched": [
+        {
+          "pass": "E1",
+          "exposures": 6,
+          "mjd_start": 60926.27879,
+          "mjd_end": 60927.90897
+        },
+        {
+          "pass": "E2",
+          "exposures": 7,
+          "mjd_start": 61100.20604,
+          "mjd_end": 61108.21767
+        },
+        {
+          "pass": "E3",
+          "exposures": 6,
+          "mjd_start": 61293.38212,
+          "mjd_end": 61297.32146
+        }
+      ]
+    },
+    "r-dra": {
+      "whole_band": [
+        {
+          "pass": "E1",
+          "exposures": 38,
+          "mjd_start": 60834.78842,
+          "mjd_end": 60858.90972
+        },
+        {
+          "pass": "E3",
+          "exposures": 36,
+          "mjd_start": 60997.7334,
+          "mjd_end": 61023.73927
+        },
+        {
+          "pass": "E7",
+          "exposures": 11,
+          "mjd_start": 61212.14309,
+          "mjd_end": 61214.45434
+        }
+      ],
+      "matched": [
+        {
+          "pass": "E1",
+          "exposures": 21,
+          "mjd_start": 60834.78842,
+          "mjd_end": 60858.90972
+        },
+        {
+          "pass": "E3",
+          "exposures": 23,
+          "mjd_start": 60997.7334,
+          "mjd_end": 61023.73927
+        },
+        {
+          "pass": "E7",
+          "exposures": 11,
+          "mjd_start": 61212.14309,
+          "mjd_end": 61214.45434
+        }
+      ]
+    }
+  }
+}

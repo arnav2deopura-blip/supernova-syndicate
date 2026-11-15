@@ -100,3 +100,33 @@ Cached products are keyed by `release_tag` + the index fingerprint, so nothing s
 - Hit the backend once to wake it up (free hosts sleep).
 - Confirm the five presets load from `frontend/precomputed/` with the backend off.
 - Open every link in a private window.
+
+## Current release operations
+
+The revised deploy script defaults to **one awake replica** and one process. Set
+`MIN_REPLICAS=0` explicitly only when accepting interrupted work/cold starts to save
+credits. The already deployed v4 configuration is historical; local changes do not
+change it until a deployment runs. Default CORS is the project's GitHub Pages origin;
+set `ALLOWED_ORIGINS` to a comma-separated allowlist for additional sites.
+
+Job status snapshots now live under `SPHEREX_CACHE_DIR`. An interrupted job reports
+restart/retry instead of pretending it completed. Durable hosting requires a mounted
+volume; ordinary container `/tmp` still disappears on replacement. Provision an
+Azure Files share and register it as environment storage using the [Azure storage
+mount guide](https://learn.microsoft.com/azure/container-apps/storage-mounts).
+Then run `CACHE_STORAGE_NAME=<registered-environment-storage-name> scripts/deploy_azure.sh`.
+The script attaches that existing storage at `/mnt/spherex-cache` and uses it for
+jobs and products. It does not silently create a storage account or incur its charges.
+This mounted path has not been provisioned by the local code audit.
+
+For new data, run the manually dispatched **prepare reviewed SPHEREx index refresh**
+workflow. Download its candidate index artifact, review the release span/config,
+rebuild saved products with `python scripts/precompute.py --science`, run the suites
+and `scripts/validate_live.py`, then commit and deploy together. A newly discovered
+release requires adding its collection/release to `backend/config.yaml` before the
+refresh. Index contents, backend source and scientific configuration all contribute
+to the processing hash, so equal-length index changes invalidate product caches.
+The UI's date is the indexed cutoff, not a promise of automatic weekly ingestion.
+
+Release sign-off must follow `RELEASE_READINESS.md` on the actual deployed revision.
+Local browser checks do not certify an older public frontend/backend pair.

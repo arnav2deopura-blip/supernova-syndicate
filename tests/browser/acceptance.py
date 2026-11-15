@@ -2,7 +2,7 @@ from playwright.sync_api import sync_playwright
 import json, os
 BASE=os.environ.get("SPHEREX_PREVIEW_URL","http://localhost:5600")
 with sync_playwright() as p:
- b=p.chromium.launch(executable_path='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless=True)
+ b=p.chromium.launch(executable_path=os.environ.get('PLAYWRIGHT_CHROMIUM_EXECUTABLE'),headless=True)
  page=b.new_page(viewport={'width':1440,'height':1000});page.set_default_timeout(20000)
  errors=[];page.on('pageerror',lambda e:errors.append(e.stack))
  page.goto(BASE+'/?api=default&name=Barnard%27s+Star')
@@ -13,7 +13,7 @@ with sync_playwright() as p:
   page.locator(selector).click();mark(selector)
  page.locator('#speed').fill('7')
  page.locator('#timeline button').first.click()
- for view in ['diff','changes','sum','blink','colours','blink']:
+ for view in ['smooth','pair','diff','changes','sum','blink','colours','blink']:
   page.locator('[data-view='+view+']').click();page.wait_for_timeout(500);mark('view '+view)
  page.select_option('#zoom','2');page.select_option('#zoom','1')
  page.locator('#display-opts').evaluate('(e)=>e.open=true')
@@ -22,10 +22,13 @@ with sync_playwright() as p:
  page.locator('#show-overlay').uncheck();page.locator('#show-events').uncheck()
  with page.expect_download() as dl:page.locator('#save-png').click()
  assert dl.value.suggested_filename.endswith('.png');mark('image export')
+ page.locator('[data-view=pair]').click()
  with page.expect_download(timeout=30000) as movie:
   page.locator('#save-movie').click()
  assert movie.value.suggested_filename.endswith(('.webm','.mp4'));mark('movie export')
  assert page.locator('#save-movie').is_enabled()
+ assert page.locator('[data-view=pair]').get_attribute('aria-checked')=='true'
+ page.locator('[data-view=blink]').click()
 
  page.locator('#advanced').evaluate('(e)=>e.open=true');page.wait_for_timeout(3000)
  print('ADV',page.locator('#adv-body').inner_text()[:700],flush=True)
@@ -47,8 +50,8 @@ with sync_playwright() as p:
  assert seen, 'Map Compare did not request images';mark('sky selection reaches real frames API')
  if page.locator('#progress-cancel').is_visible(): page.locator('#progress-cancel').click()
  # Deterministic slow request checks cancellation even when live data is already cached.
- page.route('**/api/frames?**',lambda route:route.fulfill(status=202,content_type='application/json',headers={'Access-Control-Allow-Origin':'*'},body=json.dumps({'job_id':'audit','state':'running','stage':'test','status_url':BASE+'/audit-job'})))
- page.route('**/audit-job',lambda route:route.fulfill(content_type='application/json',body=json.dumps({'job_id':'audit','state':'running','stage':'test'})))
+ page.route('**/api/frames?**',lambda route:route.fulfill(status=202,content_type='application/json',headers={'Access-Control-Allow-Origin':'*'},body=json.dumps({'job_id':'audit','state':'running','stage':'test','status_url':'https://spherex-api.redgrass-773e0da8.canadacentral.azurecontainerapps.io/api/jobs/audit'})))
+ page.route('**/api/jobs/audit',lambda route:route.fulfill(content_type='application/json',body=json.dumps({'job_id':'audit','state':'running','stage':'test'})))
  page.goto(BASE+'/?api=default&fresh=1&mode=coords&ra=10&dec=20&fov=0.04')
  page.wait_for_function("document.querySelector('#progress-text').textContent.includes('first look')")
  page.locator('#progress-cancel').click()

@@ -57,13 +57,15 @@ export function framesFromCube(cube, lo, hi, passFrames = []) {
     const k = +c.channel.slice(-2);
     return c.channel.startsWith(det) && k >= lo && k <= hi && c.frames?.length;
   });
+  const requested=Array.from({length:hi-lo+1},(_,i)=>chName(det,lo+i));
+  const missing=requested.filter(id=>!chans.some(c=>c.channel===id));
   const labels = [...new Set(chans.flatMap((c) => c.frames.map((f) => f.epoch_label)))].sort((a, b) => +a.slice(1) - +b.slice(1));
   const n = cube.wcs.width * cube.wcs.height;
   const frames = [];
   for (const label of labels) {
     const parts = chans.map((c) => c.frames.find((f) => f.epoch_label === label)).filter(Boolean);
     // a pass is only fair to compare when it has every chosen channel
-    if (parts.length < chans.length) continue;
+    if (missing.length || parts.length !== requested.length) continue;
     const data = new Array(n);
     for (let i = 0; i < n; i++) {
       let s = 0, m = 0;
@@ -75,15 +77,17 @@ export function framesFromCube(cube, lo, hi, passFrames = []) {
     const mjd = mjds.length ? mjds.reduce((a, b) => a + b, 0) / mjds.length : meta.mjd_mean;
     frames.push({
       epoch_label: label, data, noise: null, width: cube.wcs.width, height: cube.wcs.height,
-      mjd_start: meta.mjd_start ?? mjd, mjd_end: meta.mjd_end ?? mjd, mjd_mean: mjd,
+      mjd_start: parts.every(p=>Number.isFinite(p.mjd_start)) ? Math.min(...parts.map(p=>p.mjd_start)) : mjd,
+      mjd_end: parts.every(p=>Number.isFinite(p.mjd_end)) ? Math.max(...parts.map(p=>p.mjd_end)) : mjd, mjd_mean: mjd,
       n_exposures: parts.reduce((a, p) => a + (p.n_exposures || 0), 0),
-      flag_fraction: meta.flag_fraction ?? null,
+      flag_fraction: data.filter(v=>v===null).length/n,
+      obs_ids: [...new Set(parts.flatMap(p=>p.obs_ids || []))],
       lam_eff_um: parts.reduce((a, p) => a + (p.lam_target_um || 0), 0) / parts.length || null,
-      target_flags: [...new Set(parts.flatMap((p) => p.target_flags || []))],
+      target_flags: parts.every(p=>Array.isArray(p.target_flags)) ? [...new Set(parts.flatMap(p=>p.target_flags))] : null,
     });
   }
   const skipped = labels.length - frames.length;
-  return { frames, channels: chans.map((c) => c.channel), skipped };
+  return { frames, channels: requested, missing, skipped };
 }
 
 /** Passes that have every channel lo..hi of this per-pass cube. */

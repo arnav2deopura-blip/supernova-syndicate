@@ -9,7 +9,7 @@ from typing import Literal, Optional, Union
 from pydantic import BaseModel, Field
 
 Band = Literal["D1", "D2", "D3", "D4", "D5", "D6"]
-ErrorCode = Literal["bad_request", "not_found", "upstream_unavailable", "not_implemented"]
+ErrorCode = Literal["bad_request", "not_found", "upstream_unavailable", "not_implemented", "busy"]
 
 
 class ErrorResponse(BaseModel):
@@ -21,6 +21,7 @@ class ResolveResponse(BaseModel):
     name: str
     ra: float
     dec: float
+    propagated: bool = False
     epoch: float = Field(description="Decimal year the position is valid for")
     pmra: Optional[float] = None
     pmdec: Optional[float] = None
@@ -58,7 +59,9 @@ class Frame(BaseModel):
     data: Union[list[Optional[float]], str] = Field(
         description="Flat row-major array (row 0 = top, null = masked) or a URL to one"
     )
-    flag_fraction: float
+    flag_fraction: Optional[float] = None
+    coverage: Optional[str] = None
+    quality_semantics: str = 'masked_fraction'
     # Additive (phase 1); optional so mocks without them stay valid.
     mjd_mean: Optional[float] = Field(None, description="Mean MJD of the exposures in this frame")
     lam_um: Optional[list[float]] = Field(None, description="Wavelength at the target in each exposure, um")
@@ -80,6 +83,12 @@ class Frame(BaseModel):
 
 
 class FramesResponse(BaseModel):
+    inputs: Optional[list[dict]] = None
+    retrieval: Optional[dict] = None
+    provenance: Optional[dict] = None
+    completeness: Optional[dict] = None
+    warning: Optional[str] = None
+    comparison_scope: str = 'field_centre_quicklook'
     ra: float
     dec: float
     fov: float
@@ -94,7 +103,7 @@ class FramesResponse(BaseModel):
 
 
 class FlagsSummary(BaseModel):
-    flag_fraction: float
+    flag_fraction: Optional[float] = None
     target_flags: Optional[list[str]] = None
 
 
@@ -140,6 +149,11 @@ class RatioPoint(BaseModel):
 
 
 class SpectrumResponse(BaseModel):
+    completeness: Optional[dict] = None
+    selected_input_records: Optional[list[dict]] = None
+    provenance: Optional[dict] = None
+    retrieval: Optional[dict] = None
+    reliability: Optional[dict] = None
     ra: float
     dec: float
     points: list[SpectrumPoint]
@@ -187,6 +201,8 @@ class JobStatus(BaseModel):
 # ---------------------------------------------------------------- items 3-5 (additive)
 
 class CubeFrame(BaseModel):
+    mjd_start: Optional[float] = None
+    mjd_end: Optional[float] = None
     epoch_label: str
     data: Union[list[Optional[float]], str] = Field(description="Flat row-major array (row 0 = top) or a URL to one")
     n_exposures: int
@@ -220,6 +236,11 @@ class CubeChannel(BaseModel):
 
 
 class CubeResponse(BaseModel):
+    completeness: Optional[dict] = None
+    selected_input_records: Optional[list[dict]] = None
+    provenance: Optional[dict] = None
+    retrieval: Optional[dict] = None
+    reliability: Optional[dict] = None
     ra: float
     dec: float
     fov: float
@@ -250,6 +271,11 @@ class LightCurveBin(BaseModel):
 
 
 class LightCurveResponse(BaseModel):
+    completeness: Optional[dict] = None
+    selected_input_records: Optional[list[dict]] = None
+    provenance: Optional[dict] = None
+    retrieval: Optional[dict] = None
+    reliability: Optional[dict] = None
     ra: float
     dec: float
     det: Band
@@ -302,6 +328,11 @@ class MotionFit(BaseModel):
 
 
 class MotionResponse(BaseModel):
+    completeness: Optional[dict] = None
+    selected_input_records: Optional[list[dict]] = None
+    provenance: Optional[dict] = None
+    retrieval: Optional[dict] = None
+    reliability: Optional[dict] = None
     ra: float
     dec: float
     det: str

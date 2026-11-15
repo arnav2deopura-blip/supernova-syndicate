@@ -96,3 +96,20 @@ test('astro helpers: galactic centre, the parallax rule, false alarms', () => {
   assert.equal(distance(500, 1, 'Gaia').value, 2);
   assert.ok(falseAlarms(117 * 117, 5) < 0.01);
 });
+
+
+test('a wholly absent requested channel cannot become a narrower comparison',()=>{
+ const cube={det:'D6',wcs:{width:1,height:1},channels:[{channel:'D6C01',frames:[{epoch_label:'E1',data:[1],mjd_mean:60000}]}]};
+ const result=framesFromCube(cube,1,2);
+ assert.deepEqual(result.frames,[]);assert.deepEqual(result.missing,['D6C02']);
+});
+
+test('negative parallax and zero or invalid errors do not yield distances',()=>{
+ for(const pair of [[-10,-1],[10,0],[Infinity,1],[10,NaN]]) assert.ok(distance(...pair).unknown);
+});
+
+test('selected-channel metadata comes from contributing cells, not unrelated base frames',()=>{
+ const cube={det:'D6',wcs:{width:1,height:1},channels:[{channel:'D6C01',frames:[{epoch_label:'E1',data:[1],mjd_mean:61000,mjd_start:60999,mjd_end:61001,n_exposures:1,obs_ids:['actual']}]}]};
+ const result=framesFromCube(cube,1,1,[{epoch_label:'E1',mjd_start:50000,mjd_end:70000,flag_fraction:.9}]);
+ assert.equal(result.frames[0].mjd_start,60999);assert.equal(result.frames[0].flag_fraction,0);assert.deepEqual(result.frames[0].obs_ids,['actual']);
+});

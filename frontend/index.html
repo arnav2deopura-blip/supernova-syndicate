@@ -11,6 +11,7 @@
   <a class="skip-link" href="#viewer">Skip to the viewer</a>
   <header class="top">
     <div>
+      <p class="mission-kicker">SUPERNOVA SYNDICATE / SKY OBSERVATORY</p>
       <h1>SPHEREx Sky Explorer</h1>
       <p class="tagline">Find what moved, appeared or changed between SPHEREx passes of the infrared sky</p>
     </div>
@@ -90,6 +91,7 @@
 
       <!-- Shared by all modes -->
       <div class="shared" id="shared">
+        <label class="check" title="Require the backend; saved test-target observations will not be substituted"><input id="live-only" type="checkbox"> Backend only</label>
         <label><span>Field of view <button type="button" class="info" data-term="fov"></button></span>
           <select id="fov">
             <option value="0.04">0.04°</option>
@@ -105,7 +107,7 @@
             <option value="D5">D5 · 3.8–4.4 µm</option><option value="D6">D6 · 4.4–5.0 µm</option>
           </select>
         </label>
-        <label class="check" title="Matched wavelengths: use only the spectral channels seen in every pass"><input id="matched" type="checkbox" checked> Fair brightness comparison <button type="button" class="info" data-term="matched"></button></label>
+        <label class="check" title="Matched wavelengths: use only the spectral channels seen in every pass"><input id="matched" type="checkbox" checked> Match wavelengths at centre <button type="button" class="info" data-term="matched"></button></label>
         <div class="wl" id="wl">
           <span class="k">Wavelengths <button type="button" class="info" data-term="channel"></button></span>
           <div class="seg" role="radiogroup" aria-label="Wavelengths to use">
@@ -141,6 +143,8 @@
 
       <div class="seg views" role="radiogroup" aria-label="What to show" id="views">
         <button type="button" role="radio" data-view="blink" aria-checked="true" title="Blink: play the passes as a movie">Play passes</button>
+        <button type="button" role="radio" data-view="smooth" aria-checked="false" title="Visual crossfade; blended moments are not observations">Smooth</button>
+        <button type="button" role="radio" data-view="pair" aria-checked="false" title="Two passes with shared sky placement, stretch and zoom">Side by side</button>
         <button type="button" role="radio" data-view="diff" aria-checked="false">Difference</button>
         <button type="button" role="radio" data-view="changes" aria-checked="false">Changes (σ)</button>
         <button type="button" role="radio" data-view="sum" aria-checked="false" title="All passes added: faintest things">Sum</button>
@@ -160,9 +164,14 @@
 
       <div id="viewer-notice" class="notice" hidden></div>
 
+      <div class="pair-stage" id="pair-stage" hidden>
+        <div class="pair-pane"><div class="pair-inner"><canvas id="pair-a" aria-label="Pass A image; click to measure a spectrum"></canvas><canvas id="pair-overlay-a" aria-hidden="true"></canvas></div><span id="pair-label-a"></span></div>
+        <div class="pair-pane"><div class="pair-inner"><canvas id="pair-b" aria-label="Pass B image; click to measure a spectrum"></canvas><canvas id="pair-overlay-b" aria-hidden="true"></canvas></div><span id="pair-label-b"></span></div>
+      </div>
       <div class="stage" id="stage">
         <div class="stage-inner" id="stage-inner">
           <canvas id="image" width="48" height="48" aria-label="SPHEREx image. Click a star to measure its spectrum."></canvas>
+          <canvas id="transition" aria-hidden="true"></canvas>
           <canvas id="overlay" aria-hidden="true"></canvas>
         </div>
         <div class="stage-empty" id="stage-empty"><p>Pick a target above, or try <button type="button" class="link" id="empty-preset">Barnard's Star</button>.</p></div>

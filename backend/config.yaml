@@ -86,3 +86,10 @@ lightcurve:                # item 4 (backend/lightcurve.py)
   floor: 0.02              # systematic error per point, fraction; raised to the comparison-star rms when larger
   bin_days: 15             # light-curve bins (finer than the 90-day image passes)
   n_comparison: 8          # Gaia comparison stars run through the same pipeline
+
+# Bound memory as well as queued jobs. Dense fields can use a smaller FOV.
+jobs:
+  workers: 2
+  capacity: 8
+limits:
+  max_native_pixels: 16000000
