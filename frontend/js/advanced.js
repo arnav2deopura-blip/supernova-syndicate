@@ -155,7 +155,7 @@ export function renderAdvanced(body, ctx) {
   }
   if (movers?.tracks) exp.append(el("button", { type: "button", text: "Tracks JSON", onclick: () => download("tracks.json", JSON.stringify(movers.tracks, null, 2), "application/json") }));
   if (events?.length) exp.append(el("button", { type: "button", text: "Events CSV", onclick: () => download("events.csv", toCSV([["id", "kind", "ra", "dec", "sigma", "confidence", "flags"], ...events.map((e) => [e.id, e.kind, e.ra, e.dec, e.sigma, e.confidence, e.flags.join(" ")])]), "text/csv") }));
-  const cite = `This research used SPHEREx data (NASA/IPAC IRSA; doi:10.26131/IRSA678, doi:10.26131/IRSA679), Gaia DR3 (ESA; Gaia Collaboration et al. 2023, A&A 674, A1), SIMBAD (CDS) and the SPHEREx Sky Explorer (Supernova Syndicate, NASA Space Apps 2026). Release: ${resp.release || "unknown"}.`;
+  const cite = `This research used SPHEREx data (NASA/IPAC IRSA; doi:10.26131/IRSA678, doi:10.26131/IRSA679), Gaia DR3 (ESA; Gaia Collaboration et al. 2023, A&A 674, A1), SIMBAD (CDS) and the SPHEREx Sky Explorer (Sphere Shift, NASA Space Apps 2026). Release: ${resp.release || "unknown"}.`;
   const copy = el("button", { type: "button", text: "Copy citation", onclick: async () => {
     try { await navigator.clipboard.writeText(cite); copy.textContent = "Copied ✓"; } catch { copy.textContent = "Select the text below"; }
   } });

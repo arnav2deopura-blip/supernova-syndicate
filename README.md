@@ -2,7 +2,7 @@
 
 **A blink comparator for a 102-colour sky.** Type coordinates, watch the infrared sky change between SPHEREx passes, and spot stars that move or flicker.
 
-Built by **Supernova Syndicate** for the 2026 NASA Space Apps Challenge (SPHEREx / Planet X challenge).
+Built by **Sphere Shift** for the 2026 NASA Space Apps Challenge (SPHEREx / Planet X challenge).
 
 > Status: under construction during the hackathon (14–15 Nov 2026).
 
@@ -145,7 +145,7 @@ We used Anthropic's Claude to help plan the project and scaffold this repository
 
 ## Team
 
-Supernova Syndicate. _TODO: names and roles (A Data/Backend, B Science, C Frontend/Ship)._
+Sphere Shift. _TODO: names and roles (A Data/Backend, B Science, C Frontend/Ship)._
 
 Licence: MIT.
 
