@@ -1,6 +1,7 @@
 // Advanced drawer for professionals: per-pass and per-exposure metadata, astrometry, photometry, derived physics
 // and exports. Rule: never fabricate — a missing value shows "Unknown" with the reason on hover. Owner: C.
 import { el, download, toCSV, mjdDate } from "./events-ui.js";
+import { renderFieldMetrics } from "./field-metrics.js";
 import { galactic, ecliptic, distance, tangentialVelocity, passMagnitudes, reducedPM, blackbodyT, falseAlarms } from "./astro.js";
 
 const f = (v, d = 2) => (v == null || !Number.isFinite(+v) ? null : (+v).toFixed(d));
@@ -21,8 +22,10 @@ const section = (title, ...kids) => el("section", {}, el("h3", { text: title }),
 const loadingOr = (state, why, build) => (state === "loading" ? el("p", { class: "hint", text: "Loading…" })
   : state?.error ? el("p", { class: "hint" }, unk(state.error), ` — ${state.error}`) : !state ? el("p", { class: "hint", text: why }) : build(state));
 
+export { deriveAdvanced } from "./field-metrics.js";
+
 export function renderAdvanced(body, ctx) {
-  const { target, resp, band, matched, exposures, motion, lightcurve, movers, events, spectrum, threshold, fitsURL, sexa } = ctx;
+  const { target, resp, band, matched, exposures, motion, lightcurve, movers, events, spectrum, threshold, fitsURL, sexa, pick } = ctx;
   if (!target || !resp) { body.replaceChildren(el("p", { class: "hint", text: "Load a target first." })); return; }
   const frames = resp.frames;
   const out = [];
@@ -44,6 +47,15 @@ export function renderAdvanced(body, ctx) {
       val(f(fr.flag_fraction != null ? fr.flag_fraction * 100 : null, 2), "Not reported"),
       fr.target_flags?.length ? fr.target_flags.join(" ") : "none",
     ]))));
+
+  // ---- field summary and the clicked pixel (first vs last pass) ----
+  const fm = el("div");
+  renderFieldMetrics(fm, {
+    frames: resp, spectrum, source: resp._provenance,
+    selectedPixel: pick ? { x: Math.floor(pick.x), y: Math.floor(pick.y) } : null,
+    resolved: target.pm ? { pmra: target.pm.pmra, pmdec: target.pm.pmdec, name: target.label } : null,
+  });
+  out.push(section("Field summary and selected pixel", fm));
 
   // ---- exposures ----
   out.push(section("Exposures",

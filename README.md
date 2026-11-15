@@ -61,6 +61,8 @@ A single SPHEREx exposure isn't one colour: each detector sits behind a linear v
 
 The change detector runs in the browser (`frontend/js/changes.js`); `node scripts/check_changes.mjs --inject` runs it on the five presets and checks that injected fake sources are recovered.
 
+Frontend tests (no browser needed): `node --test frontend/tests/*.mjs`. Offline, the page uses the saved bakes only when they match the request exactly; synthetic data appears only with `?mock`. Fair brightness comparison (matched wavelengths) is on by default; `?matched=0` turns it off.
+
 ## Science products (backend API)
 
 Every product is computed from real SPHEREx DR1 + QR3 level-2 images; see [docs/API.md](docs/API.md).

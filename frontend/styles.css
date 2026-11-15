@@ -381,3 +381,12 @@ body.embed footer { padding: 4px 8px; font-size: 0.75rem; }
   .timeline { margin: 2px 4px 8px; }
   .player { gap: 6px; }
 }
+
+/* field summary (Advanced drawer) */
+.science-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; margin: 6px 0; }
+.science-metric { background: #05080d; border-radius: 4px; padding: 6px 8px; display: grid; gap: 2px; }
+.science-metric dt { color: var(--muted); font-size: 0.78rem; }
+.science-metric dd { margin: 0; font-variant-numeric: tabular-nums; }
+.science-note { color: var(--muted); font-size: 0.75rem; margin: 4px 0; }
+.science-warning { color: var(--warn); }
+.science-provenance { font-size: 0.8rem; margin: 0 0 4px; }

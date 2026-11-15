@@ -18,8 +18,7 @@ const el = (tag, props = {}, ...kids) => {
 };
 export { el };
 
-/** MJD -> calendar date string. */
-export const mjdDate = (mjd) => new Date((mjd - 40587) * 86400000).toISOString().slice(0, 10);
+export { mjdDate } from "./coordinates.js";
 
 function kindLabel(e) {
   if (e.kind === "known_mover" && e.known?.gaia) return "Known mover (Gaia)";

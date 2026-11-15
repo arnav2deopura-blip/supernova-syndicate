@@ -7,6 +7,7 @@
 // (the 17 channels of a band). Changes are circled automatically (js/changes.js) and listed as Events.
 // URL: ?mode=&ra=&dec=&fov=&band=&matched=&name=&view=&a=&b=&ch=lo-hi&tour=1&embed=1
 import { api, setFallbackHandler } from "./api.js";
+import { parseCoord } from "./coordinates.js";
 import { Player } from "./player.js";
 import { draw, sumFrames } from "./render.js";
 import { pixelToSky, skyToPixel, prepareOverlay, drawGaia, drawEvents, drawPick } from "./overlays.js";
@@ -24,11 +25,11 @@ import { tourSteps, renderGuide } from "./guide.js";
 // The five challenge test targets. Coordinates are refined at start-up from the precomputed bakes
 // (precomputed/<slug>/resolve.json, the exact positions the bakes were built at).
 const PRESETS = [
-  { slug: "barnards-star", label: "Barnard's Star", name: "Barnard's Star", ra: 269.446074, dec: 4.770711, band: "D2" },
-  { slug: "eps-indi-b", label: "ε Indi B", name: "eps Indi B", ra: 331.0984021, dec: -56.8012569, band: "D3" },
-  { slug: "wise-0855", label: "WISE 0855−0714", name: "WISE J085510.83-071442.5", ra: 133.7577838, dec: -7.2420232, band: "D6" },
-  { slug: "rw-aur", label: "RW Aur", name: "RW Aur", ra: 76.9565886, dec: 30.4012864, band: "D2" },
-  { slug: "r-dra", label: "R Dra", name: "R Dra", ra: 248.1672204, dec: 66.7550253, band: "D2" },
+  { slug: "barnards-star", label: "Barnard's Star", name: "Barnard's Star", ra: 269.446074, dec: 4.770711, band: "D2", aliases: ["barnard", "barnards star"] },
+  { slug: "eps-indi-b", label: "ε Indi B", name: "eps Indi B", ra: 331.0984021, dec: -56.8012569, band: "D3", aliases: ["epsilon indi b", "ε indi b"] },
+  { slug: "wise-0855", label: "WISE 0855−0714", name: "WISE J085510.83-071442.5", ra: 133.7577838, dec: -7.2420232, band: "D6", aliases: ["wise 0855", "wise 0855-0714"] },
+  { slug: "rw-aur", label: "RW Aur", name: "RW Aur", ra: 76.9565886, dec: 30.4012864, band: "D2", aliases: ["rw aurigae"] },
+  { slug: "r-dra", label: "R Dra", name: "R Dra", ra: 248.1672204, dec: 66.7550253, band: "D2", aliases: ["r draconis"] },
 ];
 const MODES = ["explore", "name", "coords"];
 const VIEWS = ["blink", "diff", "changes", "sum", "colours"];
@@ -105,19 +106,6 @@ function hideBanner() { ui.banner.hidden = true; fallbackLevel = 0; }
 setFallbackHandler((msg, level) => { if (level >= fallbackLevel) { fallbackLevel = level; showBanner(msg); } });
 
 // ---- coordinates: parsing and formatting ----
-/** Decimal degrees, or sexagesimal (RA in hours). Returns NaN when unreadable. */
-export function parseCoord(text, isRA) {
-  const s = String(text).trim();
-  if (/^[-+]?\d+(\.\d+)?$/.test(s)) return parseFloat(s);
-  const parts = s.replace(/[hdms°'"′″]/g, " ").split(/[\s:]+/).filter(Boolean).map(Number);
-  if (parts.length < 2 || parts.length > 3 || parts.some(Number.isNaN)) return NaN;
-  const sign = s.startsWith("-") ? -1 : 1;
-  const [a, b, c = 0] = parts.map(Math.abs);
-  if (b >= 60 || c >= 60) return NaN;
-  const val = sign * (a + b / 60 + c / 3600);
-  return isRA ? val * 15 : val;
-}
-
 /** "ra dec" in one string: "269.4 4.7", "269.4, +4.7", "17:57:47 +04:46:14", "17 57 47 +04 46 14". */
 export function parsePair(text) {
   const s = String(text).trim();
@@ -157,10 +145,9 @@ function sepDeg(ra1, dec1, ra2, dec2) {
 }
 /** The preset whose bake sits at this position (so the offline fallback works in every mode). */
 const nearestPreset = (ra, dec) => PRESETS.find((p) => sepDeg(ra, dec, p.ra, p.dec) < 0.01) || null;
-const presetByName = (name) => {
-  const n = name.trim().toLowerCase().replace(/[’']/g, "'");
-  return PRESETS.find((p) => [p.name, p.label, p.slug].some((x) => x.toLowerCase() === n)) || null;
-};
+// case, apostrophes, unicode minus and spacing don't matter ("barnards star", "WISE 0855−0714")
+const normName = (v) => v.toLowerCase().replace(/[’']/g, "").replace(/−/g, "-").trim().replace(/\s+/g, " ");
+const presetByName = (name) => PRESETS.find((p) => [p.name, p.label, p.slug, ...(p.aliases || [])].some((x) => normName(x) === normName(name))) || null;
 
 // ---- shared controls ----
 function fovValue() { return parseFloat(ui.fov.value); }
@@ -718,7 +705,7 @@ function writeURL() {
     url.searchParams.set("dec", +t.dec.toFixed(6));
     url.searchParams.set("fov", ui.fov.value);
     url.searchParams.set("band", ui.band.value);
-    if (ui.matched.checked) url.searchParams.set("matched", "1");
+    if (!ui.matched.checked) url.searchParams.set("matched", "0");
     if (t.name) url.searchParams.set("name", t.name);
     if (state.view !== "blink") url.searchParams.set("view", state.view);
     if ((state.view === "diff" || state.view === "changes") && passFrames().length > 1) {
@@ -731,7 +718,7 @@ function writeURL() {
 }
 let wantedAB = null;   // ?a=&b= epoch labels from the URL, applied once frames arrive
 
-const fitsURL = () => (api.live && state.target && state.wl.kind === "detector"
+const fitsURL = () => (state.base?._provenance?.kind === "live" && state.target && state.wl.kind === "detector"
   ? api.framesFitsURL({ ra: state.base.ra, dec: state.base.dec, fov: state.base.fov, band: ui.band.value, matched: ui.matched.checked }) : null);
 
 // ---- the one loader every mode ends in ----
@@ -874,7 +861,7 @@ function refreshAdvanced() {
     target: state.target, resp: state.frames, band: ui.band.value, matched: isMatched(),
     exposures: state.adv.exposures, motion: state.adv.motion, lightcurve: state.adv.lightcurve,
     movers: state.movers, events: state.events, spectrum: state.spectrum, threshold: THRESHOLD,
-    fitsURL: fitsURL(), sexa: state.target ? fmtSexa(state.target.ra, state.target.dec) : "",
+    fitsURL: fitsURL(), sexa: state.target ? fmtSexa(state.target.ra, state.target.dec) : "", pick: state.pick,
   });
 }
 ui.advanced.open = store.get(ADV_KEY) === "1";
@@ -1277,7 +1264,7 @@ const qp = new URLSearchParams(location.search);
 if (qp.has("embed")) document.body.classList.add("embed");
 if (qp.has("fov")) setFov(+qp.get("fov"));
 if (qp.has("band") && DETECTORS[qp.get("band")]) ui.band.value = qp.get("band");
-ui.matched.checked = qp.get("matched") === "1";
+ui.matched.checked = qp.get("matched") !== "0";   // fair brightness comparison is the default
 if (VIEWS.includes(qp.get("view"))) state.view = qp.get("view");
 if (qp.has("a") && qp.has("b")) wantedAB = [qp.get("a"), qp.get("b")];
 const ch = /^(\d+)-(\d+)$/.exec(qp.get("ch") || "");
