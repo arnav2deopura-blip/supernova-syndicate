@@ -4,19 +4,38 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SPHEREx Sky Explorer</title>
-  <meta name="description" content="Blink SPHEREx infrared sky passes to find stars that move or change.">
+  <meta name="description" content="Blink SPHEREx infrared sky passes to find stars that move, appear, disappear or change brightness.">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <header>
-    <h1>SPHEREx Sky Explorer</h1>
-    <p class="tagline">A blink comparator for a 102-colour sky</p>
+  <a class="skip-link" href="#viewer">Skip to the viewer</a>
+  <header class="top">
+    <div>
+      <h1>SPHEREx Sky Explorer</h1>
+      <p class="tagline">Find what moved, appeared or changed between SPHEREx passes of the infrared sky</p>
+    </div>
+    <div class="top-actions">
+      <span id="new-data" class="badge badge-new" hidden></span>
+      <button type="button" id="guide-btn">What am I looking at?</button>
+      <button type="button" id="tour-btn" class="round" aria-label="Start the guided tour" title="Guided tour">?</button>
+    </div>
   </header>
+
+  <div id="tour-offer" class="offer" role="region" aria-label="Tour offer" hidden>
+    <span>New here? A 1-minute tour shows how to spot a moving star.</span>
+    <button type="button" class="primary" id="tour-offer-yes">Take the tour</button>
+    <button type="button" id="tour-offer-no">No thanks</button>
+  </div>
 
   <div id="banner" class="banner" role="status" hidden></div>
 
   <main>
     <section class="controls" aria-label="Choose a target">
+      <div class="search-summary" id="search-summary" hidden>
+        <span id="search-summary-text"></span>
+        <button type="button" id="search-expand">Change target</button>
+      </div>
+      <div id="search-body">
       <div class="tabs" role="tablist" aria-label="Search mode">
         <button type="button" role="tab" id="tab-explore" data-mode="explore" aria-controls="panel-explore">Explore the sky</button>
         <button type="button" role="tab" id="tab-name" data-mode="name" aria-controls="panel-name">Object name</button>
@@ -35,7 +54,7 @@
           <button type="button" id="sky-draw" aria-pressed="false">Draw box</button>
           <button type="button" id="sky-view">Use current view</button>
         </div>
-        <p class="hint">Drag to pan, scroll or pinch to zoom. <b>Click</b> to drop a box of the chosen FOV, or <b>Shift+drag</b> (or “Draw box”, then drag) to draw one, up to 0.5°. Orange circles are the test targets.</p>
+        <p class="hint">Drag to pan, scroll or pinch to zoom. <b>Click</b> to drop a box of the chosen field of view, or <b>Shift+drag</b> (or “Draw box”, then drag) to draw one, up to 0.5°. Orange circles are the test targets.</p>
         <div class="selection" id="sky-selection">
           <div><span class="k">Cursor</span> <span id="sky-cursor">–</span></div>
           <div><span class="k">Selection</span> <span id="sky-sel">none yet</span></div>
@@ -54,23 +73,24 @@
           <button type="submit" class="primary">Search &amp; compare</button>
         </div>
         <div class="result" id="name-result" hidden></div>
-        <div class="presets" id="presets" aria-label="Test targets"><span class="k">Test targets:</span></div>
+        <div class="presets" id="presets" aria-label="Test targets"><span class="k">Try one:</span></div>
       </form>
 
       <!-- Mode 3: coordinates -->
       <form class="panel" id="panel-coords" role="tabpanel" aria-labelledby="tab-coords" hidden novalidate>
         <div class="row">
-          <label>RA <input id="ra" placeholder="269.4461 or 17:57:47.1" autocomplete="off" inputmode="decimal"></label>
+          <label><span>RA <button type="button" class="info" data-term="radec"></button></span><input id="ra" placeholder="269.4461 or 17:57:47.1" autocomplete="off" inputmode="decimal"></label>
           <label>Dec <input id="dec" placeholder="4.7707 or +04:46:14" autocomplete="off" inputmode="decimal"></label>
           <button type="submit" class="primary">Compare</button>
         </div>
         <p class="hint">ICRS. Decimal degrees, or sexagesimal (RA in hours: <code>17:57:47</code> / <code>17h57m47s</code>). You can also paste both into the RA box: <code>269.446 4.771</code>.</p>
         <p class="echo" id="coord-echo" aria-live="polite"></p>
       </form>
+      </div>
 
       <!-- Shared by all modes -->
-      <div class="shared">
-        <label>FOV
+      <div class="shared" id="shared">
+        <label><span>Field of view <button type="button" class="info" data-term="fov"></button></span>
           <select id="fov">
             <option value="0.04">0.04°</option>
             <option value="0.1" selected>0.1°</option>
@@ -78,14 +98,31 @@
             <option value="0.5">0.5°</option>
           </select>
         </label>
-        <label>Band
+        <label><span>Colour band <button type="button" class="info" data-term="band"></button></span>
           <select id="band">
             <option value="D1">D1 · 0.75–1.1 µm</option><option value="D2" selected>D2 · 1.1–1.6 µm</option>
             <option value="D3">D3 · 1.6–2.4 µm</option><option value="D4">D4 · 2.4–3.8 µm</option>
             <option value="D5">D5 · 3.8–4.4 µm</option><option value="D6">D6 · 4.4–5.0 µm</option>
           </select>
         </label>
-        <label title="Use only the spectral channels seen in every pass, so brightness changes are real (fewer exposures)"><input id="matched" type="checkbox"> Match wavelengths</label>
+        <label class="check" title="Matched wavelengths: use only the spectral channels seen in every pass"><input id="matched" type="checkbox"> Fair brightness comparison <button type="button" class="info" data-term="matched"></button></label>
+        <div class="wl" id="wl">
+          <span class="k">Wavelengths <button type="button" class="info" data-term="channel"></button></span>
+          <div class="seg" role="radiogroup" aria-label="Wavelengths to use">
+            <button type="button" role="radio" data-wl="detector" aria-checked="true">Whole band (clearest)</button>
+            <button type="button" role="radio" data-wl="range" aria-checked="false">Pick channels</button>
+          </div>
+        </div>
+      </div>
+      <div class="range-box" id="range-box" hidden>
+        <div class="range-row">
+          <label>From channel <input id="ch-lo" type="range" min="1" max="17" value="7"></label>
+          <label>to <input id="ch-hi" type="range" min="1" max="17" value="11"></label>
+          <output id="ch-label">–</output>
+          <button type="button" id="ch-apply" class="primary">Show these channels</button>
+        </div>
+        <p class="hint">Fewer channels = fewer exposures = noisier. Channels stay inside one detector, so the picture never mixes two instruments.</p>
+        <div class="molecules" id="molecules"><span class="k">Molecules:</span></div>
       </div>
 
       <div class="progress" id="progress" hidden>
@@ -95,53 +132,120 @@
       </div>
     </section>
 
-    <section class="viewer" aria-label="Viewer">
+    <section class="viewer" id="viewer" aria-label="Viewer" tabindex="-1">
       <div class="viewer-head">
         <h2 id="target-label">No target yet</h2>
+        <span class="badges" id="badges"></span>
         <button type="button" id="show-on-sky" class="link" hidden>Show on sky map</button>
       </div>
-      <div class="stage">
-        <canvas id="image" width="48" height="48"></canvas>
-        <canvas id="overlay"></canvas>
+
+      <div class="seg views" role="radiogroup" aria-label="What to show" id="views">
+        <button type="button" role="radio" data-view="blink" aria-checked="true" title="Blink: play the passes as a movie">Play passes</button>
+        <button type="button" role="radio" data-view="diff" aria-checked="false">Difference</button>
+        <button type="button" role="radio" data-view="changes" aria-checked="false">Changes (σ)</button>
+        <button type="button" role="radio" data-view="sum" aria-checked="false" title="All passes added: faintest things">Sum</button>
+        <button type="button" role="radio" data-view="colours" aria-checked="false" title="Play through the channels of this band instead of through time">Colours</button>
+        <button type="button" class="info" data-term="diff"></button>
       </div>
+
+      <div class="ab" id="ab" hidden>
+        <label>Pass A <select id="pass-a"></select></label>
+        <span aria-hidden="true">→</span>
+        <label>Pass B <select id="pass-b"></select></label>
+        <span class="k" id="ab-hint"></span>
+        <label title="How big a brightness change on a star counts. Careful: changes must exceed 10 % of the star's brightness as well as 5σ. Sensitive: 5 % (more real variables, more false alarms).">Sensitivity
+          <select id="sensitivity"><option value="0.1">Careful</option><option value="0.05">Sensitive</option></select>
+        </label>
+      </div>
+
+      <div id="viewer-notice" class="notice" hidden></div>
+
+      <div class="stage" id="stage">
+        <div class="stage-inner" id="stage-inner">
+          <canvas id="image" width="48" height="48" aria-label="SPHEREx image. Click a star to measure its spectrum."></canvas>
+          <canvas id="overlay" aria-hidden="true"></canvas>
+        </div>
+        <div class="stage-empty" id="stage-empty"><p>Pick a target above, or try <button type="button" class="link" id="empty-preset">Barnard's Star</button>.</p></div>
+      </div>
+
+      <div class="legend" id="legend" hidden>
+        <span><i class="sym sym-ring"></i>brighter / new</span>
+        <span><i class="sym sym-x"></i>fainter / gone</span>
+        <span><i class="sym sym-arrow"></i>moved</span>
+        <span><i class="sym sym-half"></i>variable</span>
+        <span><i class="sym sym-dash"></i>dashed = uncertain <button type="button" class="info" data-term="confidence"></button></span>
+        <span class="scale" id="sigma-scale" hidden><b class="bar"></b><span>−5σ</span><span>0</span><span>+5σ</span></span>
+      </div>
+
       <div class="player">
-        <button id="play" type="button">Pause</button>
-        <label>Speed <input id="speed" type="range" min="1" max="10" value="3"></label>
-        <span id="frame-label">–</span>
+        <button type="button" id="prev" aria-label="Previous frame" title="Previous (←)">◀</button>
+        <button type="button" id="play" class="play" title="Play / pause (space)">Pause</button>
+        <button type="button" id="next" aria-label="Next frame" title="Next (→)">▶</button>
+        <label class="speed">Speed <input id="speed" type="range" min="1" max="10" value="3"></label>
+        <span id="frame-label" aria-live="polite">–</span>
       </div>
-      <div class="display">
-        <label>Mode
-          <select id="mode">
-            <option value="blink">Blink</option>
-            <option value="diff">Difference (last − first)</option>
-            <option value="sum">Sum</option>
-          </select>
+      <div class="timeline" id="timeline" aria-label="Passes on a time axis"></div>
+      <div class="filmstrip" id="filmstrip" hidden></div>
+
+      <div class="toggles">
+        <label class="check"><input id="show-overlay" type="checkbox" checked> Gaia stars <button type="button" class="info" data-term="gaia"></button></label>
+        <label class="check"><input id="show-events" type="checkbox" checked> Change markers</label>
+        <label>Zoom
+          <select id="zoom"><option value="1">1×</option><option value="2">2×</option><option value="3">3×</option><option value="4">4×</option></select>
         </label>
-        <label>Stretch
-          <select id="stretch">
-            <option value="asinh">asinh</option>
-            <option value="linear">linear</option>
-          </select>
-        </label>
-        <label>Colormap
-          <select id="cmap">
-            <option value="gray">gray</option>
-            <option value="inferno">inferno</option>
-            <option value="viridis">viridis</option>
-          </select>
-        </label>
-        <label>Clip % <input id="clip" type="range" min="90" max="100" step="0.1" value="99.5"></label>
-        <label><input id="show-overlay" type="checkbox" checked> Gaia overlay</label>
+        <button type="button" id="save-png">Save image</button>
+        <button type="button" id="save-movie">Save movie</button>
       </div>
+      <details class="display-opts" id="display-opts">
+        <summary>Display options</summary>
+        <div class="row">
+          <label><span>Contrast <button type="button" class="info" data-term="contrast"></button></span>
+            <select id="stretch">
+              <option value="asinh">Show faint things (asinh)</option>
+              <option value="linear">Linear</option>
+            </select>
+          </label>
+          <label>Colours
+            <select id="cmap">
+              <option value="gray">Grey</option>
+              <option value="inferno">Inferno</option>
+              <option value="viridis">Viridis</option>
+            </select>
+          </label>
+          <label><span>Brightness cap <button type="button" class="info" data-term="cap"></button></span> <input id="clip" type="range" min="90" max="100" step="0.1" value="99.5"></label>
+        </div>
+      </details>
     </section>
 
     <aside class="side">
-      <h2>Frames</h2>
-      <table id="meta"><thead><tr><th>Epoch</th><th>MJD</th><th>Exposures</th><th>Flagged</th></tr></thead><tbody></tbody></table>
+      <div id="events-panel">
+      <div class="events-head">
+        <h2>Events <button type="button" class="info" data-term="changes"></button></h2>
+        <label class="check small"><input id="show-low" type="checkbox"> <span>show uncertain (<span id="low-count">0</span>)</span></label>
+      </div>
+      <p class="hint" id="events-summary">Events appear once a target has two or more passes.</p>
+      <ol class="events" id="events"></ol>
+      <div class="event-detail" id="event-detail" hidden></div>
+      </div>
+
       <h2>Spectrum <small>(click the image)</small></h2>
       <canvas id="spectrum" width="360" height="200"></canvas>
     </aside>
+
+    <details class="advanced" id="advanced">
+      <summary>Advanced: passes, exposures, astrometry, photometry, derived physics, exports</summary>
+      <div id="adv-body" class="adv-body"><p class="hint">Load a target first.</p></div>
+    </details>
   </main>
+
+  <dialog id="guide" class="guide" aria-labelledby="guide-title">
+    <div class="guide-head">
+      <h2 id="guide-title">What am I looking at?</h2>
+      <button type="button" class="round" id="guide-close" aria-label="Close">✕</button>
+    </div>
+    <p class="hint">Volunteers learn faster from examples of real and fake changes than from rules. Each card loads a real example from the five test targets.</p>
+    <div class="guide-cards" id="guide-cards"></div>
+  </dialog>
 
   <footer>
     Data: SPHEREx (NASA/IPAC IRSA), Gaia DR3 (ESA); sky map: Aladin Lite (CDS). <span id="data-span"></span>

@@ -48,12 +48,18 @@ A single SPHEREx exposure isn't one colour: each detector sits behind a linear v
 
 - [x] Three search modes: explore the sky map, object name, RA/Dec
 - [x] Progress and cancel for slow first requests (async jobs)
-- [ ] Epoch blink per detector band, play/pause, speed
-- [ ] Stretch and colormap controls, all in the browser
-- [ ] Difference and sum modes
-- [ ] Gaia DR3 overlay with proper-motion arrows
-- [ ] Click for a quick-look spectrum; light curves
-- [x] Shareable URLs: `?mode=&ra=&dec=&fov=&band=&matched=&name=`
+- [x] Play passes (blink) per detector band, play/pause/step, speed, a timeline of passes on a real time axis
+- [x] Difference and **Changes (σ)** between any two passes, from the calibrated noise maps; Sum
+- [x] **"What changed?" markers**: regions ≥ 5σ circled automatically (○ brighter/new, ✕ fainter/gone, → moved, ◐ variable; dashed = uncertain), merged with Gaia known movers, the `/api/movers` search and the `/api/lightcurve` verdict, listed as Events
+- [x] Per-event card: each pass at that spot with S/N, one-click "Is it new?" checks (SIMBAD, CatWISE, Gaia, IRSA Finder Chart, SkyBoT), JSON/CSV report
+- [x] Skippable guided tour (`?tour=1`, "?" button), "What am I looking at?" field guide, glossary ⓘ tooltips, plain-language controls
+- [x] 102 bands browsable: whole detector band, a channel range inside one detector, molecule presets (water ice, PAH/CH₄, CO₂ ice, CO), and a Colours view that plays through a band's 17 channels
+- [x] Advanced drawer: per-pass and per-exposure metadata, SPHEREx-only proper motion, photometry, derived physics (Unknown + reason when an input is missing), exports, citation
+- [x] Gaia DR3 overlay with proper-motion tracks; click for a spectrum
+- [x] Save image / movie, `?embed=1` bare player, reduced-motion respected, phone layout
+- [x] Shareable URLs: `?mode=&ra=&dec=&fov=&band=&matched=&name=&view=&a=&b=&ch=`
+
+The change detector runs in the browser (`frontend/js/changes.js`); `node scripts/check_changes.mjs --inject` runs it on the five presets and checks that injected fake sources are recovered.
 
 ## Science products (backend API)
 

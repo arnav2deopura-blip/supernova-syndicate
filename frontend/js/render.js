@@ -6,7 +6,7 @@ const CMAPS = {
   gray: [[0, 0, 0], [255, 255, 255]],
   inferno: [[0, 0, 4], [87, 16, 110], [188, 55, 84], [249, 142, 9], [252, 255, 164]],
   viridis: [[68, 1, 84], [59, 82, 139], [33, 145, 140], [94, 201, 98], [253, 231, 37]],
-  // Diverging map for difference images: blue = fainter, red = brighter.
+  // Diverging map for difference images: blue = fainter, red = brighter (also readable with red-green colour blindness).
   diverging: [[33, 102, 172], [247, 247, 247], [178, 24, 43]],
 };
 
@@ -28,13 +28,9 @@ function percentile(values, p) {
   return v[Math.min(v.length - 1, Math.max(0, Math.round((p / 100) * (v.length - 1))))];
 }
 
-/** Combine frames according to the display mode. Returns a flat array. */
-export function composeFrame(frames, index, mode) {
-  if (mode === "blink" || frames.length < 2) return frames[index].data;
+/** Sum of every frame (null where any frame has no data). */
+export function sumFrames(frames) {
   const a = frames[0].data;
-  const b = frames[frames.length - 1].data;
-  if (mode === "diff") return b.map((v, i) => (v === null || a[i] === null ? null : v - a[i]));
-  // sum
   return a.map((_, i) => {
     let s = 0;
     for (const f of frames) {
@@ -49,7 +45,7 @@ export function composeFrame(frames, index, mode) {
  * Draw a flat float array to the canvas.
  * Limits come from `limitsFrom` (all frames) so brightness changes between epochs stay visible.
  */
-export function draw(canvas, data, width, height, { stretch = "asinh", cmap = "gray", clip = 99.5, limitsFrom = data, diverging = false } = {}) {
+export function draw(canvas, data, width, height, { stretch = "asinh", cmap = "gray", clip = 99.5, limitsFrom = data, diverging = false, range = null } = {}) {
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext("2d");
@@ -57,7 +53,9 @@ export function draw(canvas, data, width, height, { stretch = "asinh", cmap = "g
   const table = lut(diverging ? "diverging" : cmap);
 
   let lo, hi;
-  if (diverging) {
+  if (range) {
+    [lo, hi] = range;   // fixed limits, e.g. ±5σ for the change view or a cube's display_range
+  } else if (diverging) {
     const m = Math.max(Math.abs(percentile(limitsFrom, 100 - clip)), Math.abs(percentile(limitsFrom, clip))) || 1;
     lo = -m; hi = m;
   } else {

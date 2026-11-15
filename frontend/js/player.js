@@ -10,10 +10,11 @@ export class Player {
     this.timer = null;
   }
 
-  load(count) {
+  /** Start over with `count` frames, at `index` (default 0). count 0 just stops. */
+  load(count, index = 0) {
     this.count = count;
-    this.index = 0;
-    this.onFrame(0);
+    this.index = Math.min(Math.max(0, index ?? 0), Math.max(0, count - 1));
+    if (count) this.onFrame(this.index);
     this._restart();
   }
 

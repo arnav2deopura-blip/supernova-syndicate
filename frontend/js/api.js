@@ -7,6 +7,7 @@ export const API_BASE = "http://localhost:8000";
 const params = new URLSearchParams(location.search);
 const FORCE_MOCK = params.has("mock");
 const POLL_MS = 1000;
+let lastSource = null;   // "live" | "precomputed" | "mock"
 
 /** fn(message, level): level 1 = precomputed bake, 2 = mock. */
 let onFallback = () => {};
@@ -18,6 +19,7 @@ export class ApiError extends Error {
 
 /** Errors that are real answers from the backend, not outages: never hide them behind a fallback. */
 const isAnswer = (e) => e.name === "AbortError" || e.code === "bad_request" || e.code === "not_found";
+export { isAnswer };
 
 async function fetchJSON(url, signal) {
   const res = await fetch(url, { signal });
@@ -39,10 +41,12 @@ const clean = (q) => Object.fromEntries(Object.entries(q).filter(([, v]) => v !=
  * Call the live backend; on an outage try precomputed/<preset>/<file> (first that exists and passes
  * `accept`), then mock/<endpoint>.json. `live` may be overridden (used by the async job flow).
  */
-async function call(endpoint, query, { preset, files = [`${endpoint}.json`], accept = () => true, live, signal } = {}) {
+async function call(endpoint, query, { preset, files = [`${endpoint}.json`], accept = () => true, live, signal, mock = true } = {}) {
   if (!FORCE_MOCK) {
     try {
-      return await (live ? live() : getJSON(liveURL(endpoint, query), signal));
+      const r = await (live ? live() : getJSON(liveURL(endpoint, query), signal));
+      lastSource = "live";
+      return r;
     } catch (e) {
       if (isAnswer(e)) throw e;
       console.warn(`/api/${endpoint} failed:`, e.message);
@@ -53,28 +57,49 @@ async function call(endpoint, query, { preset, files = [`${endpoint}.json`], acc
           const data = await getJSON(`precomputed/${preset}/${file}`, signal);
           if (!accept(data)) continue;
           onFallback("Backend unreachable — showing precomputed data for this target.", 1);
+          lastSource = "precomputed";
           return data;
         } catch (e) { if (e.name === "AbortError") throw e; /* not baked */ }
       }
     }
   }
+  // products without a mock file: say it is unavailable instead of inventing data
+  if (!mock && !FORCE_MOCK) throw new ApiError(`/${endpoint} is not available offline for this position.`, "offline");
   onFallback("Showing MOCK data (fake, for development).", 2);
+  lastSource = "mock";
   return getJSON(`mock/${endpoint}.json`, signal);
 }
 
-// `data` (and `noise`) in a frame may be a URL instead of an inline array (see docs/API.md).
+// `data` and `noise` in a frame may be a URL instead of an inline array (see docs/API.md).
+async function loadArray(ref, signal) {
+  if (typeof ref !== "string") return ref;
+  const res = await fetch(ref, { signal });
+  if (!res.ok) throw new ApiError(`Frame data missing (HTTP ${res.status})`, "upstream_unavailable", res.status);
+  if (ref.split("?")[0].endsWith(".bin")) {
+    const arr = new Float32Array(await res.arrayBuffer());
+    return Array.from(arr, (v) => (Number.isFinite(v) ? v : null));
+  }
+  return res.json();
+}
+
 async function inlineFrameData(resp, signal) {
   await Promise.all(resp.frames.map(async (f) => {
-    if (typeof f.data !== "string") return;
-    const res = await fetch(f.data, { signal });
-    if (!res.ok) throw new ApiError(`Frame data missing (HTTP ${res.status})`, "upstream_unavailable", res.status);
-    if (f.data.endsWith(".bin")) {
-      const arr = new Float32Array(await res.arrayBuffer());
-      f.data = Array.from(arr, (v) => (Number.isFinite(v) ? v : null));
-    } else {
-      f.data = await res.json();
-    }
+    f.data = await loadArray(f.data, signal);
+    // the noise map is optional: without it the σ-change view is unavailable, the rest still works
+    try { f.noise = f.noise ? await loadArray(f.noise, signal) : null; }
+    catch (e) { if (e.name === "AbortError") throw e; f.noise = null; }
   }));
+  return resp;
+}
+
+/** Cube channel images: `data` (all passes) or `frames[].data` (per_pass=1). */
+async function inlineCubeData(resp, signal) {
+  const jobs = [];
+  for (const ch of resp.channels || []) {
+    if (ch.data) jobs.push(loadArray(ch.data, signal).then((a) => { ch.data = a; }));
+    for (const f of ch.frames || []) jobs.push(loadArray(f.data, signal).then((a) => { f.data = a; }));
+  }
+  await Promise.all(jobs);
   return resp;
 }
 
@@ -122,9 +147,54 @@ export const api = {
 
   overlay: (q, opts = {}) => call("overlay", { ...q, cat: "gaia" }, opts),
 
-  /** Server build info (data span). Live only: no fallback, returns null when unreachable. */
-  meta: async () => {
-    if (FORCE_MOCK) return null;
-    try { return await getJSON(`${API_BASE}/api/meta`); } catch { return null; }
+  /** Discovery mode: movers in the field (may be a slow job on a new position; runs silently). */
+  movers: (q, { preset, signal } = {}) => {
+    const query = { ra: q.ra, dec: q.dec, fov: q.fov, band: q.band };
+    return call("movers", query, {
+      preset, signal,
+      live: () => runJob(liveURL("movers", query), { signal }),
+      files: [`movers_${q.band}.json`],
+      accept: (d) => d.band === q.band && Math.abs(d.fov - q.fov) < 1e-6,
+      mock: false,
+    });
   },
+
+  /** The 102-band view, one detector per call. perPass: one image per channel per pass. */
+  cube: (q, { preset, onProgress, signal } = {}) => {
+    const query = { ra: q.ra, dec: q.dec, fov: q.fov, det: q.det, per_pass: q.perPass ? 1 : undefined };
+    return call("cube", query, {
+      preset, signal,
+      live: () => runJob(liveURL("cube", query), { onProgress, signal }),
+      files: [q.perPass ? `cube_pp_${q.det}.json` : `cube_${q.det}.json`],
+      accept: (d) => d.det === q.det && !!d.per_pass === !!q.perPass && Math.abs(d.fov - q.fov) < 1e-6,
+      mock: false,
+    }).then((r) => inlineCubeData(r, signal));
+  },
+
+  motion: (q, { preset, signal } = {}) => call("motion", q, {
+    preset, signal,
+    live: () => runJob(liveURL("motion", q), { signal }),
+    files: [`motion_${q.det}.json`],
+    mock: false,
+  }),
+
+  lightcurve: (q, { preset, signal } = {}) => call("lightcurve", q, {
+    preset, signal,
+    live: () => runJob(liveURL("lightcurve", q), { signal }),
+    files: [`lightcurve_${q.det}.json`],
+    accept: (d) => d.det === q.det,
+    mock: false,
+  }),
+
+  /** Direct link to the frames as multi-extension FITS (live backend only). */
+  framesFitsURL: (q) => `${API_BASE}/api/frames.fits?${new URLSearchParams(clean({ ra: q.ra, dec: q.dec, fov: q.fov, band: q.band, matched: q.matched ? 1 : undefined }))}`,
+
+  /** Server build info (data span). Live only: no fallback, returns null when unreachable. */
+  meta: async ({ check = false } = {}) => {
+    if (FORCE_MOCK) return null;
+    try { return await getJSON(`${API_BASE}/api/meta${check ? "?check=1" : ""}`); } catch { return null; }
+  },
+
+  /** True when the last answer came from the live backend (precomputed/mock answers are offline). */
+  get live() { return lastSource === "live"; },
 };

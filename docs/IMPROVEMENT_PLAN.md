@@ -1,6 +1,8 @@
 # Improvement plan: make discoveries easy (recommendations, not built yet)
 
-**Status:** proposal for the team. Nothing here is implemented. It builds on branch `c/search-modes` (the three search modes, async jobs).
+**Status:** the frontend parts of §1–§7 are implemented (σ-change view with auto-markers and Events, any two passes, tour + glossary + field guide, channel ranges and molecule presets, Colours view, Advanced drawer, one notice component, timeline, save image/movie, embed mode). Still open: the backend `/api/changes` endpoint (§1 step 2; the browser detector in `frontend/js/changes.js` covers the frontend half), exposing exposure time / PSF FWHM / parallax errors (§4), CatWISE overlay, discovery feed. It builds on branch `c/search-modes` (the three search modes, async jobs).
+
+**Browser detector as built:** σ = (B − A) / √(σA² + σB² + (f·max(|A|,|B|))²), with the field median removed and the scatter widened (never narrowed) to unit robust std; regions ≥ 5σ. f = 10 % ("Careful") or 5 % ("Sensitive"): without this brightness floor every bright star becomes a change, because the noise maps are background-only. Fading + brightening pairs within (12″/yr·Δt + 2 PSF) become one "moved" event. Events near a Gaia high-proper-motion star or an `/api/movers` track merge into one known-mover / candidate event; a target with `/api/lightcurve` `variable: true` gets one ◐ event. On the presets: Barnard's Star → one known mover (10.4″/yr), WISE 0855 → the movers candidate (8.4″/yr), RW Aur → variable. `node scripts/check_changes.mjs --inject` recovers every injected 12σ source on empty sky.
 
 **Goal:** the whole point of the tool is finding **changes** between SPHEREx passes: things that move, appear, disappear or change brightness. Everything below is ranked by how much it helps a beginner find a real change, and how much it helps a scientist trust it.
 
