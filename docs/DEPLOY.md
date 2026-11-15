@@ -26,7 +26,7 @@ One-time setup: GitHub → Settings → Pages → Source: **GitHub Actions**.
 
 ## Backend (Azure Container Apps) — chosen host
 
-**Live:** https://spherex-api.redgrass-773e0da8.canadacentral.azurecontainerapps.io (`/api/health`). Image tag `v2`, deployed 14 Nov 2026.
+**Live:** https://spherex-api.redgrass-773e0da8.canadacentral.azurecontainerapps.io (`/api/health`). Image tag `v4`, deployed 14 Nov 2026 (adds noise maps + frame astrometry, `/movers`, `/stack`, `/frames.fits`, `/meta` to v3's `/cube`, `/lightcurve`, `/motion`, matched frames, deblended spectra).
 
 Runs on an Azure for Students subscription: no card, paid from the student credit. Cloud Run (below) needed a billing account with a card hold, so we didn't use it.
 
@@ -42,7 +42,7 @@ What the script does:
 - Builds the image locally for `linux/amd64` and pushes it.
 - Deploys `spherex-api` with 1 vCPU / 2 GiB and 0–1 replicas, then prints the URL. Set `API_BASE` in `frontend/js/api.js` to it.
 
-Redeploy new code with `TAG=v2 scripts/deploy_azure.sh` (any new tag).
+Redeploy new code with `TAG=v5 scripts/deploy_azure.sh` (any new tag).
 
 Azure for Students restrictions this works around:
 - **Regions:** only `westus2`, `canadacentral`, `westus`, `norwayeast` and `francecentral` are allowed. `canadacentral` is the closest to the SPHEREx S3 mirror in Virginia.
@@ -93,6 +93,21 @@ Local container (optional, needs Docker running):
 docker build -t spherex-api .
 docker run -p 8000:8000 -e ALLOWED_ORIGINS='*' spherex-api
 ```
+
+## New SPHEREx data
+
+`.github/workflows/check-releases.yml` runs every Monday (and on demand). It lists the public S3 mirror with
+`scripts/check_releases.py` and opens an issue "New SPHEREx data on the archive" when a release folder (e.g. `qr4/`)
+or week folders newer than the pointing index appear. `GET /api/meta?check=1` gives the same answer live.
+
+To take new data in:
+
+1. New release folder only: add it to `archive.s3_releases` and its IRSA collection names to `archive.collections`
+   in `backend/config.yaml`. Always: bump `release_tag`.
+2. `python scripts/build_coarse_index.py` (rebuilds `backend/data/coarse_index.json.gz` over every week folder).
+3. `python -m pytest`, then redeploy (`TAG=vN scripts/deploy_azure.sh`) and `python scripts/precompute.py`.
+
+Cached products are keyed by `release_tag` + the index fingerprint, so nothing stale is served after step 1–2.
 
 ## Before judging
 

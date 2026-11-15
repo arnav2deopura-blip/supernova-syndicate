@@ -1,0 +1,923 @@
+{
+ "source": "dr1/spectral_channels/cal-sch-v2-2026-229/spectral_channels_spx_cal-sch-v2-2026-229.fits",
+ "channels": [
+  {
+   "detector": 1,
+   "subchan": 1,
+   "wavelength": 0.753,
+   "wl_min": 0.743,
+   "wl_max": 0.762,
+   "R": 42.0,
+   "bandwidth": 0.018
+  },
+  {
+   "detector": 1,
+   "subchan": 2,
+   "wavelength": 0.771,
+   "wl_min": 0.761,
+   "wl_max": 0.781,
+   "R": 42.0,
+   "bandwidth": 0.019
+  },
+  {
+   "detector": 1,
+   "subchan": 3,
+   "wavelength": 0.79,
+   "wl_min": 0.78,
+   "wl_max": 0.8,
+   "R": 41.0,
+   "bandwidth": 0.019
+  },
+  {
+   "detector": 1,
+   "subchan": 4,
+   "wavelength": 0.809,
+   "wl_min": 0.798,
+   "wl_max": 0.819,
+   "R": 40.0,
+   "bandwidth": 0.02
+  },
+  {
+   "detector": 1,
+   "subchan": 5,
+   "wavelength": 0.828,
+   "wl_min": 0.817,
+   "wl_max": 0.839,
+   "R": 40.0,
+   "bandwidth": 0.02
+  },
+  {
+   "detector": 1,
+   "subchan": 6,
+   "wavelength": 0.848,
+   "wl_min": 0.837,
+   "wl_max": 0.859,
+   "R": 40.0,
+   "bandwidth": 0.021
+  },
+  {
+   "detector": 1,
+   "subchan": 7,
+   "wavelength": 0.868,
+   "wl_min": 0.857,
+   "wl_max": 0.879,
+   "R": 40.0,
+   "bandwidth": 0.022
+  },
+  {
+   "detector": 1,
+   "subchan": 8,
+   "wavelength": 0.889,
+   "wl_min": 0.877,
+   "wl_max": 0.9,
+   "R": 39.0,
+   "bandwidth": 0.023
+  },
+  {
+   "detector": 1,
+   "subchan": 9,
+   "wavelength": 0.91,
+   "wl_min": 0.898,
+   "wl_max": 0.922,
+   "R": 39.0,
+   "bandwidth": 0.023
+  },
+  {
+   "detector": 1,
+   "subchan": 10,
+   "wavelength": 0.932,
+   "wl_min": 0.92,
+   "wl_max": 0.944,
+   "R": 39.0,
+   "bandwidth": 0.024
+  },
+  {
+   "detector": 1,
+   "subchan": 11,
+   "wavelength": 0.955,
+   "wl_min": 0.942,
+   "wl_max": 0.967,
+   "R": 39.0,
+   "bandwidth": 0.025
+  },
+  {
+   "detector": 1,
+   "subchan": 12,
+   "wavelength": 0.978,
+   "wl_min": 0.964,
+   "wl_max": 0.99,
+   "R": 38.0,
+   "bandwidth": 0.026
+  },
+  {
+   "detector": 1,
+   "subchan": 13,
+   "wavelength": 1.001,
+   "wl_min": 0.988,
+   "wl_max": 1.014,
+   "R": 38.0,
+   "bandwidth": 0.026
+  },
+  {
+   "detector": 1,
+   "subchan": 14,
+   "wavelength": 1.025,
+   "wl_min": 1.012,
+   "wl_max": 1.039,
+   "R": 38.0,
+   "bandwidth": 0.027
+  },
+  {
+   "detector": 1,
+   "subchan": 15,
+   "wavelength": 1.05,
+   "wl_min": 1.036,
+   "wl_max": 1.064,
+   "R": 38.0,
+   "bandwidth": 0.028
+  },
+  {
+   "detector": 1,
+   "subchan": 16,
+   "wavelength": 1.075,
+   "wl_min": 1.061,
+   "wl_max": 1.09,
+   "R": 37.0,
+   "bandwidth": 0.029
+  },
+  {
+   "detector": 1,
+   "subchan": 17,
+   "wavelength": 1.102,
+   "wl_min": 1.086,
+   "wl_max": 1.116,
+   "R": 37.0,
+   "bandwidth": 0.03
+  },
+  {
+   "detector": 2,
+   "subchan": 1,
+   "wavelength": 1.113,
+   "wl_min": 1.099,
+   "wl_max": 1.126,
+   "R": 43.0,
+   "bandwidth": 0.026
+  },
+  {
+   "detector": 2,
+   "subchan": 2,
+   "wavelength": 1.139,
+   "wl_min": 1.125,
+   "wl_max": 1.153,
+   "R": 42.0,
+   "bandwidth": 0.027
+  },
+  {
+   "detector": 2,
+   "subchan": 3,
+   "wavelength": 1.167,
+   "wl_min": 1.152,
+   "wl_max": 1.182,
+   "R": 42.0,
+   "bandwidth": 0.028
+  },
+  {
+   "detector": 2,
+   "subchan": 4,
+   "wavelength": 1.195,
+   "wl_min": 1.18,
+   "wl_max": 1.21,
+   "R": 41.0,
+   "bandwidth": 0.029
+  },
+  {
+   "detector": 2,
+   "subchan": 5,
+   "wavelength": 1.224,
+   "wl_min": 1.209,
+   "wl_max": 1.24,
+   "R": 41.0,
+   "bandwidth": 0.03
+  },
+  {
+   "detector": 2,
+   "subchan": 6,
+   "wavelength": 1.254,
+   "wl_min": 1.238,
+   "wl_max": 1.269,
+   "R": 41.0,
+   "bandwidth": 0.03
+  },
+  {
+   "detector": 2,
+   "subchan": 7,
+   "wavelength": 1.284,
+   "wl_min": 1.267,
+   "wl_max": 1.3,
+   "R": 42.0,
+   "bandwidth": 0.031
+  },
+  {
+   "detector": 2,
+   "subchan": 8,
+   "wavelength": 1.315,
+   "wl_min": 1.298,
+   "wl_max": 1.331,
+   "R": 42.0,
+   "bandwidth": 0.032
+  },
+  {
+   "detector": 2,
+   "subchan": 9,
+   "wavelength": 1.346,
+   "wl_min": 1.329,
+   "wl_max": 1.363,
+   "R": 42.0,
+   "bandwidth": 0.032
+  },
+  {
+   "detector": 2,
+   "subchan": 10,
+   "wavelength": 1.378,
+   "wl_min": 1.36,
+   "wl_max": 1.396,
+   "R": 42.0,
+   "bandwidth": 0.033
+  },
+  {
+   "detector": 2,
+   "subchan": 11,
+   "wavelength": 1.412,
+   "wl_min": 1.393,
+   "wl_max": 1.43,
+   "R": 41.0,
+   "bandwidth": 0.034
+  },
+  {
+   "detector": 2,
+   "subchan": 12,
+   "wavelength": 1.446,
+   "wl_min": 1.426,
+   "wl_max": 1.464,
+   "R": 41.0,
+   "bandwidth": 0.035
+  },
+  {
+   "detector": 2,
+   "subchan": 13,
+   "wavelength": 1.481,
+   "wl_min": 1.461,
+   "wl_max": 1.5,
+   "R": 41.0,
+   "bandwidth": 0.036
+  },
+  {
+   "detector": 2,
+   "subchan": 14,
+   "wavelength": 1.517,
+   "wl_min": 1.496,
+   "wl_max": 1.537,
+   "R": 41.0,
+   "bandwidth": 0.037
+  },
+  {
+   "detector": 2,
+   "subchan": 15,
+   "wavelength": 1.554,
+   "wl_min": 1.533,
+   "wl_max": 1.575,
+   "R": 41.0,
+   "bandwidth": 0.038
+  },
+  {
+   "detector": 2,
+   "subchan": 16,
+   "wavelength": 1.592,
+   "wl_min": 1.57,
+   "wl_max": 1.613,
+   "R": 41.0,
+   "bandwidth": 0.039
+  },
+  {
+   "detector": 2,
+   "subchan": 17,
+   "wavelength": 1.631,
+   "wl_min": 1.608,
+   "wl_max": 1.651,
+   "R": 41.0,
+   "bandwidth": 0.039
+  },
+  {
+   "detector": 3,
+   "subchan": 1,
+   "wavelength": 1.656,
+   "wl_min": 1.636,
+   "wl_max": 1.676,
+   "R": 42.0,
+   "bandwidth": 0.039
+  },
+  {
+   "detector": 3,
+   "subchan": 2,
+   "wavelength": 1.695,
+   "wl_min": 1.675,
+   "wl_max": 1.715,
+   "R": 42.0,
+   "bandwidth": 0.041
+  },
+  {
+   "detector": 3,
+   "subchan": 3,
+   "wavelength": 1.735,
+   "wl_min": 1.714,
+   "wl_max": 1.756,
+   "R": 41.0,
+   "bandwidth": 0.042
+  },
+  {
+   "detector": 3,
+   "subchan": 4,
+   "wavelength": 1.775,
+   "wl_min": 1.754,
+   "wl_max": 1.797,
+   "R": 41.0,
+   "bandwidth": 0.043
+  },
+  {
+   "detector": 3,
+   "subchan": 5,
+   "wavelength": 1.818,
+   "wl_min": 1.795,
+   "wl_max": 1.84,
+   "R": 41.0,
+   "bandwidth": 0.045
+  },
+  {
+   "detector": 3,
+   "subchan": 6,
+   "wavelength": 1.861,
+   "wl_min": 1.838,
+   "wl_max": 1.884,
+   "R": 41.0,
+   "bandwidth": 0.046
+  },
+  {
+   "detector": 3,
+   "subchan": 7,
+   "wavelength": 1.905,
+   "wl_min": 1.881,
+   "wl_max": 1.928,
+   "R": 41.0,
+   "bandwidth": 0.047
+  },
+  {
+   "detector": 3,
+   "subchan": 8,
+   "wavelength": 1.949,
+   "wl_min": 1.925,
+   "wl_max": 1.973,
+   "R": 41.0,
+   "bandwidth": 0.048
+  },
+  {
+   "detector": 3,
+   "subchan": 9,
+   "wavelength": 1.995,
+   "wl_min": 1.97,
+   "wl_max": 2.019,
+   "R": 41.0,
+   "bandwidth": 0.049
+  },
+  {
+   "detector": 3,
+   "subchan": 10,
+   "wavelength": 2.041,
+   "wl_min": 2.015,
+   "wl_max": 2.067,
+   "R": 40.0,
+   "bandwidth": 0.051
+  },
+  {
+   "detector": 3,
+   "subchan": 11,
+   "wavelength": 2.089,
+   "wl_min": 2.062,
+   "wl_max": 2.115,
+   "R": 40.0,
+   "bandwidth": 0.052
+  },
+  {
+   "detector": 3,
+   "subchan": 12,
+   "wavelength": 2.139,
+   "wl_min": 2.111,
+   "wl_max": 2.166,
+   "R": 40.0,
+   "bandwidth": 0.054
+  },
+  {
+   "detector": 3,
+   "subchan": 13,
+   "wavelength": 2.189,
+   "wl_min": 2.16,
+   "wl_max": 2.216,
+   "R": 40.0,
+   "bandwidth": 0.055
+  },
+  {
+   "detector": 3,
+   "subchan": 14,
+   "wavelength": 2.24,
+   "wl_min": 2.211,
+   "wl_max": 2.268,
+   "R": 40.0,
+   "bandwidth": 0.056
+  },
+  {
+   "detector": 3,
+   "subchan": 15,
+   "wavelength": 2.292,
+   "wl_min": 2.262,
+   "wl_max": 2.321,
+   "R": 40.0,
+   "bandwidth": 0.057
+  },
+  {
+   "detector": 3,
+   "subchan": 16,
+   "wavelength": 2.345,
+   "wl_min": 2.314,
+   "wl_max": 2.375,
+   "R": 40.0,
+   "bandwidth": 0.058
+  },
+  {
+   "detector": 3,
+   "subchan": 17,
+   "wavelength": 2.399,
+   "wl_min": 2.367,
+   "wl_max": 2.44,
+   "R": 41.0,
+   "bandwidth": 0.059
+  },
+  {
+   "detector": 4,
+   "subchan": 1,
+   "wavelength": 2.445,
+   "wl_min": 2.422,
+   "wl_max": 2.474,
+   "R": 42.0,
+   "bandwidth": 0.058
+  },
+  {
+   "detector": 4,
+   "subchan": 2,
+   "wavelength": 2.506,
+   "wl_min": 2.47,
+   "wl_max": 2.542,
+   "R": 34.0,
+   "bandwidth": 0.073
+  },
+  {
+   "detector": 4,
+   "subchan": 3,
+   "wavelength": 2.575,
+   "wl_min": 2.538,
+   "wl_max": 2.612,
+   "R": 35.0,
+   "bandwidth": 0.074
+  },
+  {
+   "detector": 4,
+   "subchan": 4,
+   "wavelength": 2.646,
+   "wl_min": 2.607,
+   "wl_max": 2.684,
+   "R": 35.0,
+   "bandwidth": 0.076
+  },
+  {
+   "detector": 4,
+   "subchan": 5,
+   "wavelength": 2.719,
+   "wl_min": 2.678,
+   "wl_max": 2.758,
+   "R": 35.0,
+   "bandwidth": 0.078
+  },
+  {
+   "detector": 4,
+   "subchan": 6,
+   "wavelength": 2.794,
+   "wl_min": 2.752,
+   "wl_max": 2.835,
+   "R": 35.0,
+   "bandwidth": 0.079
+  },
+  {
+   "detector": 4,
+   "subchan": 7,
+   "wavelength": 2.871,
+   "wl_min": 2.828,
+   "wl_max": 2.914,
+   "R": 34.0,
+   "bandwidth": 0.084
+  },
+  {
+   "detector": 4,
+   "subchan": 8,
+   "wavelength": 2.951,
+   "wl_min": 2.906,
+   "wl_max": 2.995,
+   "R": 34.0,
+   "bandwidth": 0.086
+  },
+  {
+   "detector": 4,
+   "subchan": 9,
+   "wavelength": 3.033,
+   "wl_min": 2.985,
+   "wl_max": 3.079,
+   "R": 34.0,
+   "bandwidth": 0.089
+  },
+  {
+   "detector": 4,
+   "subchan": 10,
+   "wavelength": 3.118,
+   "wl_min": 3.069,
+   "wl_max": 3.164,
+   "R": 34.0,
+   "bandwidth": 0.091
+  },
+  {
+   "detector": 4,
+   "subchan": 11,
+   "wavelength": 3.204,
+   "wl_min": 3.155,
+   "wl_max": 3.252,
+   "R": 35.0,
+   "bandwidth": 0.093
+  },
+  {
+   "detector": 4,
+   "subchan": 12,
+   "wavelength": 3.293,
+   "wl_min": 3.242,
+   "wl_max": 3.342,
+   "R": 35.0,
+   "bandwidth": 0.094
+  },
+  {
+   "detector": 4,
+   "subchan": 13,
+   "wavelength": 3.383,
+   "wl_min": 3.33,
+   "wl_max": 3.434,
+   "R": 35.0,
+   "bandwidth": 0.096
+  },
+  {
+   "detector": 4,
+   "subchan": 14,
+   "wavelength": 3.476,
+   "wl_min": 3.422,
+   "wl_max": 3.528,
+   "R": 36.0,
+   "bandwidth": 0.098
+  },
+  {
+   "detector": 4,
+   "subchan": 15,
+   "wavelength": 3.57,
+   "wl_min": 3.514,
+   "wl_max": 3.624,
+   "R": 36.0,
+   "bandwidth": 0.099
+  },
+  {
+   "detector": 4,
+   "subchan": 16,
+   "wavelength": 3.667,
+   "wl_min": 3.61,
+   "wl_max": 3.723,
+   "R": 36.0,
+   "bandwidth": 0.102
+  },
+  {
+   "detector": 4,
+   "subchan": 17,
+   "wavelength": 3.768,
+   "wl_min": 3.707,
+   "wl_max": 3.827,
+   "R": 36.0,
+   "bandwidth": 0.103
+  },
+  {
+   "detector": 5,
+   "subchan": 1,
+   "wavelength": 3.833,
+   "wl_min": 3.8144,
+   "wl_max": 3.8514,
+   "R": 109.0,
+   "bandwidth": 0.035
+  },
+  {
+   "detector": 5,
+   "subchan": 2,
+   "wavelength": 3.867,
+   "wl_min": 3.8494,
+   "wl_max": 3.8854,
+   "R": 109.0,
+   "bandwidth": 0.036
+  },
+  {
+   "detector": 5,
+   "subchan": 3,
+   "wavelength": 3.901,
+   "wl_min": 3.8824,
+   "wl_max": 3.9194,
+   "R": 109.0,
+   "bandwidth": 0.036
+  },
+  {
+   "detector": 5,
+   "subchan": 4,
+   "wavelength": 3.935,
+   "wl_min": 3.9164,
+   "wl_max": 3.9534,
+   "R": 108.0,
+   "bandwidth": 0.036
+  },
+  {
+   "detector": 5,
+   "subchan": 5,
+   "wavelength": 3.97,
+   "wl_min": 3.9504,
+   "wl_max": 3.9884,
+   "R": 109.0,
+   "bandwidth": 0.036
+  },
+  {
+   "detector": 5,
+   "subchan": 6,
+   "wavelength": 4.005,
+   "wl_min": 3.9854,
+   "wl_max": 4.0244,
+   "R": 110.0,
+   "bandwidth": 0.036
+  },
+  {
+   "detector": 5,
+   "subchan": 7,
+   "wavelength": 4.04,
+   "wl_min": 4.0204,
+   "wl_max": 4.0594,
+   "R": 110.0,
+   "bandwidth": 0.037
+  },
+  {
+   "detector": 5,
+   "subchan": 8,
+   "wavelength": 4.076,
+   "wl_min": 4.0554,
+   "wl_max": 4.0954,
+   "R": 111.0,
+   "bandwidth": 0.037
+  },
+  {
+   "detector": 5,
+   "subchan": 9,
+   "wavelength": 4.112,
+   "wl_min": 4.0914,
+   "wl_max": 4.1314,
+   "R": 112.0,
+   "bandwidth": 0.037
+  },
+  {
+   "detector": 5,
+   "subchan": 10,
+   "wavelength": 4.148,
+   "wl_min": 4.1264,
+   "wl_max": 4.1674,
+   "R": 113.0,
+   "bandwidth": 0.037
+  },
+  {
+   "detector": 5,
+   "subchan": 11,
+   "wavelength": 4.184,
+   "wl_min": 4.1624,
+   "wl_max": 4.2034,
+   "R": 113.0,
+   "bandwidth": 0.037
+  },
+  {
+   "detector": 5,
+   "subchan": 12,
+   "wavelength": 4.22,
+   "wl_min": 4.1994,
+   "wl_max": 4.2404,
+   "R": 115.0,
+   "bandwidth": 0.037
+  },
+  {
+   "detector": 5,
+   "subchan": 13,
+   "wavelength": 4.257,
+   "wl_min": 4.2354,
+   "wl_max": 4.2774,
+   "R": 114.0,
+   "bandwidth": 0.037
+  },
+  {
+   "detector": 5,
+   "subchan": 14,
+   "wavelength": 4.294,
+   "wl_min": 4.2714,
+   "wl_max": 4.3134,
+   "R": 115.0,
+   "bandwidth": 0.037
+  },
+  {
+   "detector": 5,
+   "subchan": 15,
+   "wavelength": 4.331,
+   "wl_min": 4.3084,
+   "wl_max": 4.3514,
+   "R": 116.0,
+   "bandwidth": 0.037
+  },
+  {
+   "detector": 5,
+   "subchan": 16,
+   "wavelength": 4.368,
+   "wl_min": 4.3454,
+   "wl_max": 4.3884,
+   "R": 116.0,
+   "bandwidth": 0.038
+  },
+  {
+   "detector": 5,
+   "subchan": 17,
+   "wavelength": 4.405,
+   "wl_min": 4.3824,
+   "wl_max": 4.4264,
+   "R": 117.0,
+   "bandwidth": 0.038
+  },
+  {
+   "detector": 6,
+   "subchan": 1,
+   "wavelength": 4.435,
+   "wl_min": 4.4184,
+   "wl_max": 4.4524,
+   "R": 128.0,
+   "bandwidth": 0.035
+  },
+  {
+   "detector": 6,
+   "subchan": 2,
+   "wavelength": 4.467,
+   "wl_min": 4.4504,
+   "wl_max": 4.4844,
+   "R": 125.0,
+   "bandwidth": 0.036
+  },
+  {
+   "detector": 6,
+   "subchan": 3,
+   "wavelength": 4.5,
+   "wl_min": 4.4824,
+   "wl_max": 4.5174,
+   "R": 127.0,
+   "bandwidth": 0.035
+  },
+  {
+   "detector": 6,
+   "subchan": 4,
+   "wavelength": 4.533,
+   "wl_min": 4.5154,
+   "wl_max": 4.5504,
+   "R": 126.0,
+   "bandwidth": 0.036
+  },
+  {
+   "detector": 6,
+   "subchan": 5,
+   "wavelength": 4.566,
+   "wl_min": 4.5484,
+   "wl_max": 4.5844,
+   "R": 127.0,
+   "bandwidth": 0.036
+  },
+  {
+   "detector": 6,
+   "subchan": 6,
+   "wavelength": 4.6,
+   "wl_min": 4.5824,
+   "wl_max": 4.6184,
+   "R": 125.0,
+   "bandwidth": 0.037
+  },
+  {
+   "detector": 6,
+   "subchan": 7,
+   "wavelength": 4.635,
+   "wl_min": 4.6154,
+   "wl_max": 4.6534,
+   "R": 127.0,
+   "bandwidth": 0.036
+  },
+  {
+   "detector": 6,
+   "subchan": 8,
+   "wavelength": 4.669,
+   "wl_min": 4.6494,
+   "wl_max": 4.6884,
+   "R": 126.0,
+   "bandwidth": 0.037
+  },
+  {
+   "detector": 6,
+   "subchan": 9,
+   "wavelength": 4.704,
+   "wl_min": 4.6844,
+   "wl_max": 4.7234,
+   "R": 128.0,
+   "bandwidth": 0.037
+  },
+  {
+   "detector": 6,
+   "subchan": 10,
+   "wavelength": 4.739,
+   "wl_min": 4.7194,
+   "wl_max": 4.7584,
+   "R": 130.0,
+   "bandwidth": 0.037
+  },
+  {
+   "detector": 6,
+   "subchan": 11,
+   "wavelength": 4.773,
+   "wl_min": 4.7534,
+   "wl_max": 4.7924,
+   "R": 131.0,
+   "bandwidth": 0.036
+  },
+  {
+   "detector": 6,
+   "subchan": 12,
+   "wavelength": 4.808,
+   "wl_min": 4.7884,
+   "wl_max": 4.8274,
+   "R": 132.0,
+   "bandwidth": 0.036
+  },
+  {
+   "detector": 6,
+   "subchan": 13,
+   "wavelength": 4.843,
+   "wl_min": 4.8224,
+   "wl_max": 4.8624,
+   "R": 131.0,
+   "bandwidth": 0.037
+  },
+  {
+   "detector": 6,
+   "subchan": 14,
+   "wavelength": 4.879,
+   "wl_min": 4.8574,
+   "wl_max": 4.8994,
+   "R": 130.0,
+   "bandwidth": 0.038
+  },
+  {
+   "detector": 6,
+   "subchan": 15,
+   "wavelength": 4.915,
+   "wl_min": 4.8934,
+   "wl_max": 4.9364,
+   "R": 130.0,
+   "bandwidth": 0.038
+  },
+  {
+   "detector": 6,
+   "subchan": 16,
+   "wavelength": 4.951,
+   "wl_min": 4.9304,
+   "wl_max": 4.9724,
+   "R": 132.0,
+   "bandwidth": 0.037
+  },
+  {
+   "detector": 6,
+   "subchan": 17,
+   "wavelength": 4.988,
+   "wl_min": 4.9664,
+   "wl_max": 5.0094,
+   "R": 135.0,
+   "bandwidth": 0.037
+  }
+ ]
+}

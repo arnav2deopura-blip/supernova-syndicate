@@ -58,7 +58,8 @@ def data_version() -> str:
     tag = get_config()["release_tag"]
     try:
         idx = s3_archive.load_coarse_index()
-        return f"{tag}|idx{idx.get('every_nth_obs', 0)}:{len(idx['samples'])}"
+        v = idx.get("version", 1)
+        return f"{tag}|idx{idx.get('every_nth_obs', 0)}:{len(idx['samples'])}" + (f":v{v}" if v >= 2 else "")
     except s3_archive.S3Error:
         return f"{tag}|noidx"
 

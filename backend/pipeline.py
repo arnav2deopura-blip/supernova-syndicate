@@ -12,10 +12,13 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Callable, Optional
 
+import math
+import warnings
+
 import numpy as np
 from astropy.io import fits
 
-from . import cache, spherex_client
+from . import cache, catalogs, spherex_client
 from .config import get_config
 from .fits_processor import PreparedStamp, assign_epochs, coadd_clipped, epoch_bins, epoch_label, prepare_stamp
 from .image_alignment import reproject_to, target_wcs, to_display_rows
@@ -31,6 +34,133 @@ class NoCoverage(LookupError):
 class FrameProduct:
     meta: dict                 # FramesResponse fields, minus frame data
     arrays: list[np.ndarray]   # one float32 (height, width) array per frame, row 0 = north
+    noise: Optional[list[np.ndarray]] = None   # 1-sigma per pixel, same layout (calibrated, see calibrate_noise)
+
+
+def calibrate_noise(arrays: list[np.ndarray], noise: list[np.ndarray]) -> tuple[list[np.ndarray], Optional[list[float]]]:
+    """Scale each frame's co-add error map so difference images in sigma units have unit scatter.
+
+    coadd_clipped's error is background-only and per native exposure; bilinear reprojection onto the 2x grid
+    smooths noise, and clipping/few exposures change it per frame, so the raw maps are not the per-pixel
+    scatter. Most pixels of a pass-to-pass difference are pure noise (stars subtract out). For every pair the
+    robust variance V_ij of (A - B) is measured and modelled as k_i^2 n_i^2 + k_j^2 n_j^2 (n = median raw map),
+    then solved for one factor k per frame (least squares; with 2 frames both share one factor).
+    Returns (scaled maps, factors) or (maps, None) with < 2 frames. Bright-star residuals still exceed this
+    background noise (Poisson, PSF and wavelength differences): high |sigma| on a bright star is not by itself
+    a detection.
+    """
+    n = len(arrays)
+    med = [float(np.nanmedian(x)) if np.isfinite(x).any() else np.nan for x in noise]
+    rows, rhs = [], []
+    for i in range(n):
+        for j in range(i + 1, n):
+            d = (arrays[i] - arrays[j])[np.isfinite(arrays[i]) & np.isfinite(arrays[j])]
+            if d.size < 50 or not (np.isfinite(med[i]) and np.isfinite(med[j])):
+                continue
+            v = (1.4826 * float(np.median(np.abs(d - np.median(d))))) ** 2
+            r = np.zeros(n)
+            r[i], r[j] = med[i] ** 2, med[j] ** 2
+            rows.append(r)
+            rhs.append(v)
+    if not rows:
+        return noise, None
+    A, b = np.array(rows), np.array(rhs)
+    used = A.any(axis=0)
+    if n == 2 or np.linalg.matrix_rank(A[:, used]) < used.sum():
+        k2 = np.full(n, float(np.median(b / A.sum(axis=1))))      # one shared factor
+    else:
+        k2 = np.full(n, np.nan)
+        k2[used] = np.linalg.lstsq(A[:, used], b, rcond=None)[0]
+        k2 = np.where(np.isfinite(k2) & (k2 > 0), k2, np.nanmedian(k2[k2 > 0]) if (k2 > 0).any() else 1.0)
+    k = np.clip(np.sqrt(k2), 0.2, 10.0)
+    return [(x * f).astype(np.float32) for x, f in zip(noise, k)], [round(float(f), 4) for f in k]
+
+
+def frame_astrometry(img: np.ndarray, out_wcs, field: list[dict], mjd: float, exclude_ids=(),
+                     mag_range=(9.0, 15.5)) -> dict:
+    """Registration check of one co-added frame (FITS orientation, row 0 = south) against Gaia DR3 propagated
+    to the frame's mean MJD: centroids of bright, isolated, unsaturated Gaia stars vs their predicted pixels.
+    Returns {n_ref, dra_arcsec, ddec_arcsec (median offset), rms_arcsec (per star, after clipping)}."""
+    scale = abs(float(out_wcs.wcs.cdelt[1])) * 3600
+    h, w = img.shape
+    yr = catalogs.mjd_to_year(mjd)
+    pos = []
+    for g in field:
+        if g.get("pmra") is not None:
+            ra, dec = catalogs.propagate(g["ra"], g["dec"], g["pmra"], g["pmdec"], catalogs.GAIA_EPOCH, yr)
+        else:
+            ra, dec = g["ra"], g["dec"]
+        x, y = (float(v) for v in out_wcs.all_world2pix(ra, dec, 0))
+        if -6 <= x < w + 6 and -6 <= y < h + 6:
+            pos.append((g, x, y))
+    yy, xx = np.mgrid[0:h, 0:w]
+    offs = []
+    sig = 1.1   # ~ PSF sigma on the 3.075" grid (FWHM 7.5")
+    for g, x, y in pos:
+        m = g.get("mag")
+        if g["id"] in exclude_ids or m is None or not (mag_range[0] <= m <= mag_range[1]):
+            continue
+        if not (5 <= x < w - 5 and 5 <= y < h - 5):
+            continue
+        if any(o is not g and math.hypot(ox - x, oy - y) < 6 and (o.get("mag") or 99) < m + 3 for o, ox, oy in pos):
+            continue
+        r = np.hypot(xx - x, yy - y)
+        core, ann = r <= 3.0, (r >= 5) & (r <= 8)
+        if not np.isfinite(img[core]).all() or np.isfinite(img[ann]).sum() < 10:
+            continue   # saturated / masked core
+        bkg = float(np.nanmedian(img[ann]))
+        noise = 1.4826 * float(np.nanmedian(np.abs(img[ann] - bkg)))
+        if not noise > 0 or (img[core].max() - bkg) < 20 * noise:
+            continue
+        cx, cy = x, y
+        for _ in range(8):   # Gaussian-weighted centroid (robust on a barely sampled PSF)
+            wgt = np.exp(-((xx - cx) ** 2 + (yy - cy) ** 2) / (2 * sig ** 2)) * np.clip(img - bkg, 0, None)
+            wgt = np.where(np.hypot(xx - cx, yy - cy) <= 3.5, np.nan_to_num(wgt), 0.0)
+            if wgt.sum() <= 0:
+                break
+            nx_, ny_ = float((wgt * xx).sum() / wgt.sum()), float((wgt * yy).sum() / wgt.sum())
+            if math.hypot(nx_ - cx, ny_ - cy) < 1e-3:
+                cx, cy = nx_, ny_
+                break
+            cx, cy = nx_, ny_
+        if math.hypot(cx - x, cy - y) < 2.0:
+            offs.append((cx - x, cy - y))
+    if not offs:
+        return {"n_ref": 0, "dra_arcsec": None, "ddec_arcsec": None, "rms_arcsec": None}
+    a = np.array(offs)
+    keep = np.ones(len(a), bool)
+    for _ in range(3):
+        med = np.median(a[keep], axis=0)
+        d = np.hypot(*(a - med).T)
+        lim = max(3 * 1.4826 * float(np.median(d[keep])), 0.1)
+        new = d <= lim
+        if new.sum() < 2 or (new == keep).all():
+            break
+        keep = new
+    med = np.median(a[keep], axis=0)
+    rms = float(np.sqrt(np.mean(np.sum((a[keep] - med) ** 2, axis=1)) / 2)) if keep.sum() > 1 else None
+    # grid is north-up, east-left: +x = west, +y (FITS) = north
+    return {"n_ref": int(keep.sum()), "dra_arcsec": round(float(-med[0] * scale), 3),
+            "ddec_arcsec": round(float(med[1] * scale), 3),
+            "rms_arcsec": None if rms is None else round(rms * scale, 3)}
+
+
+def target_flagged(flags) -> bool:
+    """True when a photometry-reject flag (saturation, cosmic ray, ...) touches the target."""
+    return bool(set(flags) & set(get_config()["flags"]["photometry_reject"]))
+
+
+def add_frame_qc(product: FrameProduct, ra: float, dec: float, fov: float, field: Optional[list[dict]],
+                 exclude_ids=()) -> FrameProduct:
+    """Per-frame astrometry (needs Gaia; skipped when field is None) and target_flagged, in place."""
+    out_wcs = output_grid(ra, dec, fov)
+    for f, arr in zip(product.meta["frames"], product.arrays):
+        f["target_flagged"] = target_flagged(f.get("target_flags") or [])
+        if field:
+            a = frame_astrometry(arr[::-1], out_wcs, field, f["mjd_mean"], exclude_ids)
+            f["astrometry"] = a
+            f["astrometry_rms_arcsec"] = a["rms_arcsec"]
+    return product
 
 
 def output_grid(ra: float, dec: float, fov: float):
@@ -38,7 +168,11 @@ def output_grid(ra: float, dec: float, fov: float):
     return target_wcs(ra, dec, fov, cfg["pixel_scale_arcsec"] / cfg["oversample"])
 
 
-def build_frames(ra: float, dec: float, fov: float, band: str, progress: Progress = None) -> FrameProduct:
+def load_stamps(ra: float, dec: float, fov: float, band: str, progress: Progress = None
+                ) -> tuple[list[PreparedStamp], list[tuple[float, float]]]:
+    """Prepared stamps of one detector at a position, plus the position's shared pass bins (all detectors).
+    Raises NoCoverage. Stamps are disk-cached, so every product built from them (frames, cube, spectra,
+    light curves, motion) shares the downloads."""
     cfg = get_config()
     det = int(band[1])
     all_records = spherex_client.query_exposures(ra, dec, fov, progress=progress)
@@ -46,7 +180,6 @@ def build_frames(ra: float, dec: float, fov: float, band: str, progress: Progres
     records = [r for r in all_records if r.detector == det]
     if not records:
         raise NoCoverage(f"No SPHEREx {band} exposures cover RA {ra:.5f}, Dec {dec:.5f} in {cfg['release_tag']}.")
-
     stamps: list[PreparedStamp] = []
     for _, path in spherex_client.fetch_stamps(records, ra, dec, fov, progress=progress):
         with fits.open(path) as h:
@@ -56,6 +189,11 @@ def build_frames(ra: float, dec: float, fov: float, band: str, progress: Progres
     if not stamps:
         raise NoCoverage(f"No usable {band} stamps at RA {ra:.5f}, Dec {dec:.5f}.")
     _save_details(ra, dec, band, stamps)
+    return stamps, bins
+
+
+def build_frames(ra: float, dec: float, fov: float, band: str, progress: Progress = None) -> FrameProduct:
+    stamps, bins = load_stamps(ra, dec, fov, band, progress)
     return coadd_epochs(stamps, ra, dec, fov, band, progress, bins=bins)
 
 
@@ -98,11 +236,12 @@ def coadd_epochs(stamps: list[PreparedStamp], ra: float, dec: float, fov: float,
     for s, e in zip(stamps, labels):
         by_epoch[e].append(s)
 
-    frames, arrays = [], []
+    frames, arrays, noise = [], [], []
     for n, e in enumerate(sorted(by_epoch)):
         group = by_epoch[e]
         images = [reproject_to(s.image, s.wcs, out_wcs) for s in group]
-        img, _, nused = coadd_clipped(images, [s.bkg_rms for s in group])
+        img, err, nused = coadd_clipped(images, [s.bkg_rms for s in group])
+        noise.append(to_display_rows(err))
         if progress:
             progress("coadd", n + 1, len(by_epoch))
         mjds = [s.mjd for s in group]
@@ -131,4 +270,7 @@ def coadd_epochs(stamps: list[PreparedStamp], ra: float, dec: float, fov: float,
                 "pixel_scale_arcsec": cfg["pixel_scale_arcsec"] / cfg["oversample"], "width": w, "height": h},
         "frames": frames,
     }
-    return FrameProduct(meta, arrays)
+    noise, k = calibrate_noise(arrays, noise)
+    for f, kf in zip(frames, k or []):
+        f["noise_scale"] = kf
+    return FrameProduct(meta, arrays, noise)

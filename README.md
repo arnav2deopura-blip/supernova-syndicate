@@ -9,7 +9,8 @@ Built by **Supernova Syndicate** for the 2026 NASA Space Apps Challenge (SPHEREx
 ## Live demo
 
 - **Tool:** _TODO: GitHub Pages link_
-- **GIF:** _TODO: `docs/img/barnards.gif` of Barnard's Star moving_
+- **GIF:** [`docs/img/barnard_blink.gif`](docs/img/barnard_blink.gif): Barnard's Star moving across three SPHEREx passes
+- **Backend API:** https://spherex-api.redgrass-773e0da8.canadacentral.azurecontainerapps.io/docs
 
 ## Try it
 
@@ -24,9 +25,9 @@ Built by **Supernova Syndicate** for the 2026 NASA Space Apps Challenge (SPHEREx
 ## How it works
 
 ```
-IRSA (SIA2/TAP) ──► cutouts ──► mask + zodi subtract ──► group by epoch × detector
-   ──► reproject to one north-up grid ──► co-add ──► float arrays ──► browser
-                                                                (stretch, colormap, blink)
+IRSA TAP / public S3 mirror ──► byte-range stamps ──► flags + zodi + background ──► λ at the target per exposure
+   ──► reproject to one north-up 3.075″ grid ──► co-add per pass × detector (or matched-λ channels)
+   ──► float32 blobs + calibrated noise maps ──► browser (stretch, colormap, blink, σ-difference)
 ```
 
 A single SPHEREx exposure isn't one colour: each detector sits behind a linear variable filter. So we never blink raw exposures. Instead we co-add every exposure in one **epoch** (one ~6-month sky pass) and one **detector band**, then blink epochs within the same band.
@@ -41,6 +42,22 @@ A single SPHEREx exposure isn't one colour: each detector sits behind a linear v
 - [ ] Click for a quick-look spectrum; light curves
 - [ ] Shareable URLs: `?ra=&dec=&fov=&band=`
 
+## Science products (backend API)
+
+Every product is computed from real SPHEREx DR1 + QR3 level-2 images; see [docs/API.md](docs/API.md).
+
+| Endpoint | What it gives |
+|---|---|
+| `/api/frames` (`matched=1`) | One co-add per pass; matched mode keeps the same bandpass in every pass so brightness changes are real. Noise maps for σ-difference, per-frame registration vs Gaia |
+| `/api/frames.fits` | The same frames as multi-extension FITS for DS9 / astropy |
+| `/api/cube` | The 102-band view: one image per spectral channel |
+| `/api/spectrum` | Click-for-spectrum: forced ePSF photometry in µJy, proper motion followed, Gaia neighbours deblended |
+| `/api/lightcurve` | Bandpass-corrected light curves with comparison-star null check |
+| `/api/motion` | Proper motion (and parallax) measured from SPHEREx alone, compared with Gaia |
+| `/api/movers` | Discovery mode: movers in the field that Gaia doesn't know (rediscovers WISE 0855 blind) |
+| `/api/stack` | Shift-and-stack along a proper motion |
+| `/api/meta` | Releases in use, "data through" date, live check for new releases |
+
 ## Run locally
 
 ```bash
@@ -52,7 +69,7 @@ python -m http.server 5500 --directory frontend   # then open http://localhost:5
 
 Add `?mock=1` to the page URL to use the fake data in `frontend/mock/` without a backend.
 
-New SPHEREx release? Edit `backend/config.yaml` only (collection names, band edges). No code changes needed.
+New SPHEREx release? A weekly GitHub Action opens an issue when one appears; then edit `backend/config.yaml`, rebuild the index and redeploy. No code changes (see [docs/DEPLOY.md](docs/DEPLOY.md#new-spherex-data)).
 
 ## Validation
 
