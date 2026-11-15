@@ -8,7 +8,7 @@ Built by **Supernova Syndicate** for the 2026 NASA Space Apps Challenge (SPHEREx
 
 ## Live demo
 
-- **Tool:** _TODO: GitHub Pages link_
+- **Tool:** https://arnav2deopura-blip.github.io/supernova-syndicate/ (GitHub Pages, redeployed on every push to `main`; uses the backend below)
 - **GIF:** [`docs/img/barnard_blink.gif`](docs/img/barnard_blink.gif): Barnard's Star moving across three SPHEREx passes
 - **Backend API:** https://spherex-api.redgrass-773e0da8.canadacentral.azurecontainerapps.io/docs
 
@@ -79,16 +79,49 @@ Every product is computed from real SPHEREx DR1 + QR3 level-2 images; see [docs/
 | `/api/stack` | Shift-and-stack along a proper motion |
 | `/api/meta` | Releases in use, "data through" date, live check for new releases |
 
-## Run locally
+## Run it yourself
+
+**Just use it:** open https://arnav2deopura-blip.github.io/supernova-syndicate/. Nothing to install.
+
+**Run the frontend on your machine** (to work on it). Needs Python 3 only; the page talks to the deployed backend:
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r backend/requirements.txt
-uvicorn backend.server:app --reload
-python -m http.server 5500 --directory frontend   # then open http://localhost:5500
+git clone https://github.com/arnav2deopura-blip/supernova-syndicate.git
+cd supernova-syndicate
+scripts/run_local.sh
 ```
 
-Add `?mock=1` to the page URL to use the fake data in `frontend/mock/` without a backend.
+Open the address it prints (http://localhost:5500). Edit files in `frontend/` and reload. If changes don't show, hard-reload (Cmd+Shift+R / Ctrl+Shift+R).
+
+**Run the backend too** (to work on it, or when the deployed one is down):
+
+```bash
+scripts/run_local.sh --backend
+```
+
+The first run creates `.venv` and installs `backend/requirements.txt` (a few minutes). It starts the API on http://localhost:8000 (docs at `/docs`) and opens the page with `?api=local`. On Windows without bash, run the two servers yourself:
+
+```bash
+python -m venv .venv && .venv\Scripts\activate        # macOS/Linux: source .venv/bin/activate
+pip install -r backend/requirements.txt
+uvicorn backend.server:app --port 8000
+python -m http.server 5500 --directory frontend       # second terminal; open http://localhost:5500/?api=local
+```
+
+**Which backend the page uses:** the footer says which one and whether it answers.
+
+| URL option | Effect |
+|---|---|
+| (none) | The deployed backend on Azure |
+| `?api=local` | A backend on this machine, port 8000 (remembered in this browser) |
+| `?api=https://…` | Any other backend (remembered) |
+| `?api=default` | Back to the deployed backend |
+| `?fresh=1` | Ask the backend even for the five test targets (normally they load from `frontend/precomputed/`, the same pipeline and release, so a demo never waits on a rebuild) |
+| `?mock=1` | Fake data from `frontend/mock/`, no backend (layout work only) |
+
+A position nobody has asked for yet takes ~1–10 min to build the first time (the page shows progress), then it is cached. The deployed backend scales to zero when idle and loses its cache, so the first request after a quiet spell is slower.
+
+**Tests:** `node --test frontend/tests/*.mjs` (frontend, Node 18+), `pytest` (backend), `node scripts/check_changes.mjs --inject` (change detector on the five presets).
 
 New SPHEREx release? A weekly GitHub Action opens an issue when one appears; then edit `backend/config.yaml`, rebuild the index and redeploy. No code changes (see [docs/DEPLOY.md](docs/DEPLOY.md#new-spherex-data)).
 

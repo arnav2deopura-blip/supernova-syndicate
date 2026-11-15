@@ -3,7 +3,7 @@
 **Source of truth.** The backend (`backend/schemas.py`) and the fake data (`frontend/mock/`) must match this file.
 Changing it = one PR that updates all three together, reviewed by everyone.
 
-Base URL: set in `frontend/js/api.js` (`API_BASE`). All responses are JSON.
+Base URL: the deployed backend by default (`DEPLOYED_API` in `frontend/js/api.js`); the page can be pointed elsewhere with `?api=local` or `?api=<url>`. All responses are JSON.
 
 ## Conventions
 

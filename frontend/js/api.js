@@ -2,12 +2,34 @@
 // Order of fallbacks: live backend -> precomputed/<preset>/ (only when it matches the request exactly).
 // Synthetic mock data is shown only when asked for with ?mock: never as a silent stand-in for a failed search.
 
-// TODO (issue #11): set to the deployed backend URL.
-export const API_BASE = "http://localhost:8000";
+// Which backend: the deployed one by default. Override with ?api=local (a backend on this machine, port 8000)
+// or ?api=https://host; the choice is remembered in this browser until ?api=default.
+export const DEPLOYED_API = "https://spherex-api.redgrass-773e0da8.canadacentral.azurecontainerapps.io";
+export const LOCAL_API = "http://localhost:8000";
+const API_KEY = "sse.apiBase";
 
-const isDemo = () => typeof location !== "undefined" && new URLSearchParams(location.search).has("mock");
+function resolveApiBase() {
+  if (typeof location === "undefined") return DEPLOYED_API;
+  const store = (fn) => { try { return fn(); } catch { return null; } };
+  const asked = new URLSearchParams(location.search).get("api");
+  if (asked === "default") { store(() => localStorage.removeItem(API_KEY)); return DEPLOYED_API; }
+  if (asked) {
+    const base = asked === "local" ? LOCAL_API : /^https?:\/\/[^\s/]+(:\d+)?\/?$/.test(asked) ? asked.replace(/\/$/, "") : null;
+    if (base) { store(() => localStorage.setItem(API_KEY, base)); return base; }
+  }
+  return store(() => localStorage.getItem(API_KEY)) || DEPLOYED_API;
+}
+export const API_BASE = resolveApiBase();
+export const apiLabel = () => (API_BASE === DEPLOYED_API ? "the deployed backend (Azure)" : API_BASE === LOCAL_API ? "a local backend (localhost:8000)" : API_BASE);
+
+const params = () => (typeof location === "undefined" ? new URLSearchParams() : new URLSearchParams(location.search));
+const isDemo = () => params().has("mock");
+// The five test targets have saved bakes from the same pipeline and release: use them first so a demo never waits
+// on a server rebuild. ?fresh=1 always asks the backend.
+const preferSaved = () => !params().has("fresh");
+export const BAKE_FOV = 0.1;   // every saved bake is a 0.1° field
 const POLL_MS = 1000;
-const TIMEOUT_MS = 20000;      // one request; a long job keeps polling, each poll is short
+const TIMEOUT_MS = 45000;      // one request (a cold container can take a while to wake); long builds are jobs
 
 /** fn(message, level): level 1 = precomputed bake, 2 = mock. */
 let onFallback = () => {};
@@ -58,6 +80,10 @@ export function matchesSavedField(data, q) {
     && (!q.band || data.band === q.band) && (q.fov === undefined || Math.abs(data.fov - Number(q.fov)) < 0.00001);
 }
 
+const samePos = (d, q, tolDeg = 0.00001) => Number.isFinite(d?.ra) && Number.isFinite(d?.dec)
+  && separationRA(d.ra, Number(q.ra)) * Math.cos((Number(q.dec) * Math.PI) / 180) < tolDeg && Math.abs(d.dec - Number(q.dec)) < tolDeg;
+const bakeFov = (q) => Math.abs(Number(q.fov) - BAKE_FOV) < 1e-6;
+
 /**
  * Call the live backend; on an outage try precomputed/<preset>/<file> (first that exists and passes `accept`).
  * mock/<endpoint>.json only with ?mock. `live` may be overridden (the async job flow). `savedOnly` skips the backend.
@@ -67,6 +93,22 @@ async function call(endpoint, query, { preset, files = [`${endpoint}.json`], acc
   if (isDemo()) {
     onFallback("Showing MOCK data (synthetic, for development: not real observations).", 2);
     return tag(await getJSON(`mock/${endpoint}.json`, signal), "mock", "Synthetic demo · not real observations");
+  }
+  const trySaved = async (quiet) => {
+    if (!preset || !/^[a-z0-9-]+$/.test(preset)) return null;
+    for (const file of files) {
+      try {
+        const data = await getJSON(`precomputed/${preset}/${file}`, signal);
+        if (!accept(data)) continue;
+        if (!quiet) onFallback("Backend unreachable — showing precomputed data for this target.", 1);
+        return tag(data, "precomputed", "Saved SPHEREx observations");
+      } catch (e) { if (e.name === "AbortError") throw e; /* not baked */ }
+    }
+    return null;
+  };
+  if (!savedOnly && preferSaved()) {
+    const saved = await trySaved(true);
+    if (saved) return saved;
   }
   let liveError = null;
   if (!savedOnly) {
@@ -78,16 +120,8 @@ async function call(endpoint, query, { preset, files = [`${endpoint}.json`], acc
       console.warn(`/api/${endpoint} failed:`, e.message);
     }
   }
-  if (preset && /^[a-z0-9-]+$/.test(preset)) {
-    for (const file of files) {
-      try {
-        const data = await getJSON(`precomputed/${preset}/${file}`, signal);
-        if (!accept(data)) continue;
-        if (!savedOnly) onFallback("Backend unreachable — showing precomputed data for this target.", 1);
-        return tag(data, "precomputed", "Saved SPHEREx observations");
-      } catch (e) { if (e.name === "AbortError") throw e; /* not baked */ }
-    }
-  }
+  const saved = await trySaved(savedOnly);
+  if (saved) return saved;
   if (savedOnly || !liveError) throw new ApiError("No saved observations match this request. A live backend is needed for it.", "not_found");
   // no saved copy: say what failed, and never invent data
   throw preset ? new ApiError(`/${endpoint} is not available offline for this position.`, "offline") : liveError;
@@ -178,6 +212,9 @@ async function runJob(url, { onProgress = () => {}, signal } = {}) {
 export const api = {
   resolve: (name, opts = {}) => call("resolve", { name }, opts),
 
+  /** Is the configured backend up? {ok, release} or null. */
+  health: async () => { try { return await getJSON(`${API_BASE}/api/health`); } catch { return null; } },
+
   /** Frames for one band. Uses the async job flow so cold positions show progress instead of hanging. */
   frames: (q, { preset, onProgress, signal, savedOnly } = {}) => {
     const query = { ra: q.ra, dec: q.dec, fov: q.fov, band: q.band, matched: q.matched ? 1 : undefined };
@@ -190,15 +227,19 @@ export const api = {
     }).then((r) => inlineFrameData(r, signal)).then(validateFrames);
   },
 
-  exposures: (q, opts = {}) => call("exposures", { ra: q.ra, dec: q.dec, fov: q.fov }, opts),
+  // the exposures and overlay bakes don't record their field: the app only names a preset for its exact centre,
+  // so the size is the one thing left to check
+  exposures: (q, opts = {}) => call("exposures", { ra: q.ra, dec: q.dec, fov: q.fov }, { ...opts, accept: () => bakeFov(q) }),
 
   spectrum: (q, opts = {}) => call("spectrum", q, {
     ...opts,
     live: () => runJob(liveURL("spectrum", q), { onProgress: opts.onProgress, signal: opts.signal }),
     files: [`spectrum_${q.det || "all"}.json`, "spectrum_all.json"],
+    // the saved spectrum is the target's: only for a click within 6″ of it
+    accept: (d) => samePos(d, q, 6 / 3600),
   }),
 
-  overlay: (q, opts = {}) => call("overlay", { ...q, cat: "gaia" }, opts),
+  overlay: (q, opts = {}) => call("overlay", { ...q, cat: "gaia" }, { ...opts, accept: () => bakeFov(q) }),
 
   /** Discovery mode: movers in the field (may be a slow job on a new position; runs silently). */
   movers: (q, { preset, signal } = {}) => {
@@ -207,7 +248,7 @@ export const api = {
       preset, signal,
       live: () => runJob(liveURL("movers", query), { signal }),
       files: [`movers_${q.band}.json`],
-      accept: (d) => d.band === q.band && Math.abs(d.fov - q.fov) < 1e-6,
+      accept: (d) => matchesSavedField(d, q),
     });
   },
 
@@ -218,7 +259,7 @@ export const api = {
       preset, signal,
       live: () => runJob(liveURL("cube", query), { onProgress, signal }),
       files: [q.perPass ? `cube_pp_${q.det}.json` : `cube_${q.det}.json`],
-      accept: (d) => d.det === q.det && !!d.per_pass === !!q.perPass && Math.abs(d.fov - q.fov) < 1e-6,
+      accept: (d) => d.det === q.det && !!d.per_pass === !!q.perPass && Math.abs(d.fov - q.fov) < 1e-6 && samePos(d, q),
     }).then((r) => inlineCubeData(r, signal));
   },
 
@@ -226,13 +267,14 @@ export const api = {
     preset, signal,
     live: () => runJob(liveURL("motion", q), { signal }),
     files: [`motion_${q.det}.json`],
+    accept: (d) => samePos(d, q),
   }),
 
   lightcurve: (q, { preset, signal } = {}) => call("lightcurve", q, {
     preset, signal,
     live: () => runJob(liveURL("lightcurve", q), { signal }),
     files: [`lightcurve_${q.det}.json`],
-    accept: (d) => d.det === q.det,
+    accept: (d) => d.det === q.det && samePos(d, q),
   }),
 
   /** Direct link to the frames as multi-extension FITS (live backend only). */

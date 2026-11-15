@@ -2,21 +2,7 @@
 
 ## Local
 
-```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r backend/requirements.txt
-cp .env.example .env
-uvicorn backend.server:app --reload --port 8000
-python -m http.server 5500 --directory frontend
-```
-
-Open http://localhost:5500. Add `?mock=1` to use `frontend/mock/` without a backend.
-
-Run the tests:
-
-```bash
-pytest
-```
+See [Run it yourself](../README.md#run-it-yourself) in the README: `scripts/run_local.sh` (frontend, deployed backend) or `scripts/run_local.sh --backend` (both on this machine).
 
 ## Frontend (GitHub Pages)
 
@@ -40,7 +26,7 @@ What the script does:
 - Creates resource group `spherex-rg` in `canadacentral` and a Container Apps environment with no log workspace.
 - Creates a Basic container registry (~$5/month from credit).
 - Builds the image locally for `linux/amd64` and pushes it.
-- Deploys `spherex-api` with 1 vCPU / 2 GiB and 0–1 replicas, then prints the URL. Set `API_BASE` in `frontend/js/api.js` to it.
+- Deploys `spherex-api` with 1 vCPU / 2 GiB and 0–1 replicas, then prints the URL. If the URL changes, update `DEPLOYED_API` in `frontend/js/api.js` (anyone can also point the page at it with `?api=<url>`).
 
 Redeploy new code with `TAG=v5 scripts/deploy_azure.sh` (any new tag).
 
@@ -72,7 +58,7 @@ Deploy (Cloud Build builds the `Dockerfile`; no local Docker needed):
 scripts/deploy_cloud_run.sh
 ```
 
-It prints the service URL. Then set `API_BASE` in `frontend/js/api.js` to that URL and push (Pages redeploys).
+It prints the service URL. Then set `DEPLOYED_API` in `frontend/js/api.js` to that URL and push (Pages redeploys).
 
 Settings and why (all in the script):
 
