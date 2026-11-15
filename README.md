@@ -16,11 +16,23 @@ Built by **Supernova Syndicate** for the 2026 NASA Space Apps Challenge (SPHEREx
 
 | Target | What to look for | Link |
 |---|---|---|
-| Barnard's Star | Fast mover, dipole in difference mode | _TODO `?ra=&dec=`_ |
-| Epsilon Indi B | Faint mover near a bright star | _TODO_ |
-| WISE 0855-0714 | Very faint, very red mover (D6 only) | _TODO_ |
-| RW Aurigae | Irregular variable | _TODO_ |
-| R Draconis | Mira variable, light curve | _TODO_ |
+| Barnard's Star | Fast mover, dipole in difference mode | `?name=Barnard%27s+Star&band=D2` |
+| Epsilon Indi B | Faint mover near a bright star | `?name=eps+Indi+B&band=D3` |
+| WISE 0855-0714 | Very faint, very red mover (D6 only) | `?name=WISE+J085510.83-071442.5&band=D6` |
+| RW Aurigae | Irregular variable | `?name=RW+Aur&band=D2` |
+| R Draconis | Mira variable, light curve | `?name=R+Dra&band=D2` |
+
+## Three ways to pick a target
+
+All three end in the same comparison viewer (blink, difference, sum, Gaia overlay, click-for-spectrum):
+
+| Mode | How | Backend |
+|---|---|---|
+| **Explore the sky** | Pan and zoom the SPHEREx DR1 all-sky map ([IRSA HiPS cube](https://irsa.ipac.caltech.edu/data/hips/SPHEREx/spherex_allsky_cube), via Aladin Lite), with a slider over all 102 channels. Click to drop a box of the chosen FOV, or Shift+drag (or "Draw box" on touch) to draw one, up to 0.5°. A coverage check shows the exposures and passes before you compare | `/api/exposures`, then `/api/frames` |
+| **Object name** | Type a name (recent searches and the test targets are suggested). It resolves through SIMBAD and is propagated to now; the proper motion is used for the spectrum | `/api/resolve`, then `/api/frames` |
+| **Coordinates** | RA/Dec in decimal degrees or sexagesimal (`17:57:47 +04:46:14`), or both pasted into one box | `/api/frames` |
+
+A position nobody has asked for yet takes 1–10 min to build. The page runs it as a background job (`async=1`), shows the stage and a progress bar, and can cancel; the server keeps building, so the next request is fast. URLs keep the state: `?mode=explore|name|coords&ra=&dec=&fov=&band=&matched=1&name=`.
 
 ## How it works
 
@@ -34,13 +46,14 @@ A single SPHEREx exposure isn't one colour: each detector sits behind a linear v
 
 ## Features
 
-- [ ] RA/Dec or name input, with proper-motion correction
+- [x] Three search modes: explore the sky map, object name, RA/Dec
+- [x] Progress and cancel for slow first requests (async jobs)
 - [ ] Epoch blink per detector band, play/pause, speed
 - [ ] Stretch and colormap controls, all in the browser
 - [ ] Difference and sum modes
 - [ ] Gaia DR3 overlay with proper-motion arrows
 - [ ] Click for a quick-look spectrum; light curves
-- [ ] Shareable URLs: `?ra=&dec=&fov=&band=`
+- [x] Shareable URLs: `?mode=&ra=&dec=&fov=&band=&matched=&name=`
 
 ## Science products (backend API)
 

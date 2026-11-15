@@ -13,33 +13,93 @@
     <p class="tagline">A blink comparator for a 102-colour sky</p>
   </header>
 
-  <div id="banner" class="banner" hidden></div>
+  <div id="banner" class="banner" role="status" hidden></div>
 
   <main>
-    <section class="controls" aria-label="Target">
-      <form id="target-form">
-        <label>Name <input id="name" placeholder="Barnard's Star" autocomplete="off"></label>
-        <label>RA <input id="ra" placeholder="269.4486 or 17:57:48" required></label>
-        <label>Dec <input id="dec" placeholder="4.7394 or +04:44:22" required></label>
+    <section class="controls" aria-label="Choose a target">
+      <div class="tabs" role="tablist" aria-label="Search mode">
+        <button type="button" role="tab" id="tab-explore" data-mode="explore" aria-controls="panel-explore">Explore the sky</button>
+        <button type="button" role="tab" id="tab-name" data-mode="name" aria-controls="panel-name">Object name</button>
+        <button type="button" role="tab" id="tab-coords" data-mode="coords" aria-controls="panel-coords">Coordinates</button>
+      </div>
+
+      <!-- Mode 1: free exploration on an all-sky map -->
+      <div class="panel" id="panel-explore" role="tabpanel" aria-labelledby="tab-explore" hidden>
+        <div class="sky-wrap" id="sky-wrap">
+          <div id="sky"></div>
+          <div class="sky-msg" id="sky-msg" hidden></div>
+        </div>
+        <div class="sky-tools">
+          <label>Background <select id="sky-bg"></select></label>
+          <label class="slice">Wavelength <span class="slice-row"><input id="sky-slice" type="range" min="1" max="101" value="25"> <output id="sky-slice-label">–</output></span></label>
+          <button type="button" id="sky-draw" aria-pressed="false">Draw box</button>
+          <button type="button" id="sky-view">Use current view</button>
+        </div>
+        <p class="hint">Drag to pan, scroll or pinch to zoom. <b>Click</b> to drop a box of the chosen FOV, or <b>Shift+drag</b> (or “Draw box”, then drag) to draw one, up to 0.5°. Orange circles are the test targets.</p>
+        <div class="selection" id="sky-selection">
+          <div><span class="k">Cursor</span> <span id="sky-cursor">–</span></div>
+          <div><span class="k">Selection</span> <span id="sky-sel">none yet</span></div>
+          <div><span class="k">Coverage</span> <span id="sky-cov">–</span></div>
+          <button type="button" id="sky-compare" class="primary" disabled>Compare this region</button>
+        </div>
+      </div>
+
+      <!-- Mode 2: object name -->
+      <form class="panel" id="panel-name" role="tabpanel" aria-labelledby="tab-name" hidden>
+        <div class="row">
+          <label class="grow">Object name
+            <input id="name" list="name-suggest" placeholder="Barnard's Star, RW Aur, M42, HD 189733…" autocomplete="off" required>
+          </label>
+          <datalist id="name-suggest"></datalist>
+          <button type="submit" class="primary">Search &amp; compare</button>
+        </div>
+        <div class="result" id="name-result" hidden></div>
+        <div class="presets" id="presets" aria-label="Test targets"><span class="k">Test targets:</span></div>
+      </form>
+
+      <!-- Mode 3: coordinates -->
+      <form class="panel" id="panel-coords" role="tabpanel" aria-labelledby="tab-coords" hidden novalidate>
+        <div class="row">
+          <label>RA <input id="ra" placeholder="269.4461 or 17:57:47.1" autocomplete="off" inputmode="decimal"></label>
+          <label>Dec <input id="dec" placeholder="4.7707 or +04:46:14" autocomplete="off" inputmode="decimal"></label>
+          <button type="submit" class="primary">Compare</button>
+        </div>
+        <p class="hint">ICRS. Decimal degrees, or sexagesimal (RA in hours: <code>17:57:47</code> / <code>17h57m47s</code>). You can also paste both into the RA box: <code>269.446 4.771</code>.</p>
+        <p class="echo" id="coord-echo" aria-live="polite"></p>
+      </form>
+
+      <!-- Shared by all modes -->
+      <div class="shared">
         <label>FOV
           <select id="fov">
             <option value="0.04">0.04°</option>
             <option value="0.1" selected>0.1°</option>
             <option value="0.25">0.25°</option>
+            <option value="0.5">0.5°</option>
           </select>
         </label>
         <label>Band
           <select id="band">
-            <option>D1</option><option selected>D2</option><option>D3</option>
-            <option>D4</option><option>D5</option><option>D6</option>
+            <option value="D1">D1 · 0.75–1.1 µm</option><option value="D2" selected>D2 · 1.1–1.6 µm</option>
+            <option value="D3">D3 · 1.6–2.4 µm</option><option value="D4">D4 · 2.4–3.8 µm</option>
+            <option value="D5">D5 · 3.8–4.4 µm</option><option value="D6">D6 · 4.4–5.0 µm</option>
           </select>
         </label>
-        <button type="submit">Load</button>
-      </form>
-      <div class="presets" id="presets" aria-label="Test targets"></div>
+        <label title="Use only the spectral channels seen in every pass, so brightness changes are real (fewer exposures)"><input id="matched" type="checkbox"> Match wavelengths</label>
+      </div>
+
+      <div class="progress" id="progress" hidden>
+        <progress id="progress-bar"></progress>
+        <span id="progress-text">Working…</span>
+        <button type="button" id="progress-cancel">Cancel</button>
+      </div>
     </section>
 
     <section class="viewer" aria-label="Viewer">
+      <div class="viewer-head">
+        <h2 id="target-label">No target yet</h2>
+        <button type="button" id="show-on-sky" class="link" hidden>Show on sky map</button>
+      </div>
       <div class="stage">
         <canvas id="image" width="48" height="48"></canvas>
         <canvas id="overlay"></canvas>
@@ -84,7 +144,8 @@
   </main>
 
   <footer>
-    Data: SPHEREx (NASA/IPAC IRSA), Gaia DR3 (ESA). Built for NASA Space Apps 2026 by Supernova Syndicate.
+    Data: SPHEREx (NASA/IPAC IRSA), Gaia DR3 (ESA); sky map: Aladin Lite (CDS). <span id="data-span"></span>
+    Built for NASA Space Apps 2026 by Supernova Syndicate.
   </footer>
 
   <script type="module" src="js/app.js"></script>
