@@ -213,15 +213,16 @@ def build_matched_frames(ra: float, dec: float, fov: float, band: str, progress:
             f"matched-wavelength blink is not possible here. Use matched=0 and compare lam_eff_um between frames.")
     chans = {c.subchan: c for c in channels.for_detector(det)}
 
-    frames, arrays = [], []
+    frames, arrays, noise = [], [], []
     n_cells, done = len(passes) * len(common), 0
     for e in passes:
-        chan_imgs, chan_meta, used = [], [], []
+        chan_imgs, chan_errs, chan_meta, used = [], [], [], []
         for sub in common:
             group = cells[e][sub]
-            img, _, _ = coadd_clipped([reproject_to(s.image, s.wcs, out_wcs) for s in group],
-                                      [s.bkg_rms for s in group])
+            img, err, _ = coadd_clipped([reproject_to(s.image, s.wcs, out_wcs) for s in group],
+                                        [s.bkg_rms for s in group])
             chan_imgs.append(img)
+            chan_errs.append(err)
             used += group
             chan_meta.append({"channel": chans[sub].label, "n_exposures": len(group),
                               "lam_target_um": round(float(np.mean([s.lam_um for s in group])), 4)})
@@ -231,6 +232,10 @@ def build_matched_frames(ra: float, dec: float, fov: float, band: str, progress:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)   # all-NaN pixels stay NaN
             img = np.nanmean(np.stack(chan_imgs), axis=0).astype(np.float32)
+            ev = np.stack(chan_errs).astype(np.float64)
+            nfin = np.isfinite(ev).sum(axis=0)
+            err = (np.sqrt(np.nansum(ev ** 2, axis=0)) / np.where(nfin > 0, nfin, np.nan)).astype(np.float32)
+        noise.append(to_display_rows(err))
         mjds = [s.mjd for s in used]
         arrays.append(to_display_rows(img))
         frames.append({
@@ -261,4 +266,7 @@ def build_matched_frames(ra: float, dec: float, fov: float, band: str, progress:
         "lam_eff_um": round(float(np.mean([chans[s].wavelength for s in common])), 4),
         "frames": frames,
     }
-    return pipeline.FrameProduct(meta, arrays)
+    noise, k = pipeline.calibrate_noise(arrays, noise)
+    for f, kf in zip(frames, k or []):
+        f["noise_scale"] = kf
+    return pipeline.FrameProduct(meta, arrays, noise)

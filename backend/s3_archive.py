@@ -95,10 +95,11 @@ def _get(url: str, **kw) -> requests.Response:
 
 # ---------------------------------------------------------------- listings (cached)
 
-def list_prefix(prefix: str) -> tuple[list[str], list[str]]:
-    """(keys, sub-prefixes) directly under prefix. Cached on disk: release folders don't change."""
+def list_prefix(prefix: str, fresh: bool = False) -> tuple[list[str], list[str]]:
+    """(keys, sub-prefixes) directly under prefix. Cached on disk: release folders don't change.
+    `fresh` skips the cache read (release checks need to see folders added since)."""
     ck = cache.cache_key("s3ls", 0, 0, 0, prefix)
-    hit = cache.get_json(ck)
+    hit = None if fresh else cache.get_json(ck)
     if hit is not None:
         return hit["keys"], hit["prefixes"]
     keys, prefixes, token = [], [], None

@@ -88,6 +88,8 @@ def offline_archive(monkeypatch, tmp_path):
     monkeypatch.setattr(spherex_client, "query_exposures", lambda *a, **k: [r for r, _ in recs])
     monkeypatch.setattr(spherex_client, "fetch_stamps",
                         lambda records, *a, **k: [(r, p) for r, p in recs if r in records])
+    from backend import catalogs
+    monkeypatch.setattr(catalogs, "gaia_query", lambda *a, **k: [])   # CI stays offline (no frame astrometry)
     return recs
 
 
@@ -265,3 +267,24 @@ def test_candidate_obs_budget_thins_dense_windows_evenly(monkeypatch):
     assert len(kept) == 5 and min(kept) == 0 and max(kept) == 39
     assert len(s3_archive.candidate_obs(269.45, 4.77, 12.0, window_days=10, max_total=50)["dr1/level2/A/"]) == 40
     assert len(s3_archive.candidate_obs(269.45, 4.77, 12.0)["dr1/level2/A/"]) == 40
+
+
+def test_meta_reports_index_span_offline():
+    body = TestClient(app).get("/api/meta").json()
+    assert body["release_tag"] == get_config()["release_tag"] and body["n_channels"] == 102
+    idx = body["index"]
+    assert idx["data_from"] < idx["data_through"] and idx["n_observations"] > 1000
+    assert set(body["detectors"]) == {f"D{i}" for i in range(1, 7)}
+
+
+def test_release_check_flags_new_release_and_weeks(monkeypatch):
+    from backend import releases, s3_archive
+    listing = {"": ([], ["dr1/", "qr2/", "qr3/", "qr4/", "spectral_cube/"]),
+               "dr1/level2/": ([], ["dr1/level2/2025W17_4B/"]),
+               "qr3/level2/": ([], ["qr3/level2/2026W40_2A/", "qr3/level2/2026W41_1A/", "qr3/level2/2026W43_2A/"])}
+    monkeypatch.setattr(s3_archive, "list_prefix", lambda prefix, fresh=False: listing[prefix])
+    monkeypatch.setattr(releases, "summary", lambda: {"index": {"last_week": "qr3/level2/2026W40_2A/"}})
+    r = releases.check()
+    assert r["new_releases"] == ["qr4"]          # qr2 is superseded, not new; non-release folders ignored
+    assert r["new_week_folders"] == ["qr3/level2/2026W41_1A/", "qr3/level2/2026W43_2A/"]
+    assert r["archive_last_week"] == "2026W43" and r["up_to_date"] is False

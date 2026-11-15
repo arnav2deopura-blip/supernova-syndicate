@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
-from . import cache, catalogs, cube, jobs, lightcurve, motion, photometry, pipeline, spherex_client
+from . import cache, catalogs, cube, discovery, jobs, lightcurve, motion, photometry, pipeline, releases, spherex_client, stack
 from .config import get_config
 from .schemas import (
     Band,
@@ -37,7 +37,7 @@ cfg = get_config()
 MAX_FOV = cfg["fov"]["max_deg"]
 DEFAULT_FOV = cfg["fov"]["default_deg"]
 
-app = FastAPI(title="SPHEREx Sky Explorer API", version="0.2.0")
+app = FastAPI(title="SPHEREx Sky Explorer API", version="0.4.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cfg["allowed_origins"],
@@ -114,6 +114,27 @@ def health():
     return {"ok": True, "release": cfg["release_tag"]}
 
 
+_release_check: dict = {}
+
+
+@app.get("/api/meta")
+def meta(check: bool = Query(False, description="Also list the S3 mirror now for releases/weeks not indexed yet")):
+    """What the server is built from: releases, collections, detector bands, and the data span of the pointing
+    index ("SPHEREx data through <date>"). With check=1, a live archive check (cached 1 h)."""
+    import time
+    out = {"api_version": app.version, **releases.summary()}
+    if check:
+        hit = _release_check.get("v")
+        if hit is None or time.time() - hit[0] > 3600:
+            try:
+                hit = (time.time(), releases.check())
+            except Exception as e:  # noqa: BLE001 - the mirror being down must not break /meta
+                hit = (time.time(), {"error": "upstream_unavailable", "message": str(e)[:200]})
+            _release_check["v"] = hit
+        out["check"] = hit[1]
+    return out
+
+
 @app.get("/api/resolve", response_model=ResolveResponse)
 def resolve(name: str = Query(..., min_length=1)):
     return catalogs.resolve_name(name)
@@ -134,12 +155,13 @@ def _classify(exc: Exception) -> tuple[str, str]:
 def _frames_key(ra, dec, fov, band, matched: bool = False) -> str:
     e = cfg["epochs"]
     return cache.cache_key("frames_matched" if matched else "frames", ra, dec, fov, band,
-                           f"{spherex_client.data_version()}|ep{e['gap_days']}-{e.get('max_span_days')}")
+                           f"{spherex_client.data_version()}|ep{e['gap_days']}-{e.get('max_span_days')}|v2")
 
 
 def _cached_frames(key: str):
     meta = cache.get_json(key)
-    if meta and all((_blob_dir() / f"{f['blob']}.bin").exists() for f in meta["frames"]):
+    if meta and all((_blob_dir() / f"{f[k]}.bin").exists() for f in meta["frames"] for k in ("blob", "noise_blob")
+                    if k in f):
         return meta
     return None
 
@@ -151,9 +173,12 @@ def _build_frames(ra, dec, fov, band, progress=None, matched: bool = False) -> d
         if meta is None:
             build = cube.build_matched_frames if matched else pipeline.build_frames
             product = build(ra, dec, fov, band, progress=progress)
+            pipeline.add_frame_qc(product, ra, dec, fov, _field(ra, dec, fov))
             meta = product.meta
             for f, arr in zip(meta["frames"], product.arrays):
                 f["blob"] = _save_blob(arr)
+            for f, arr in zip(meta["frames"], product.noise or []):
+                f["noise_blob"] = _save_blob(arr)
             cache.put_json(key, meta)
             cache.prune()  # after every new product: keeps a memory-backed /tmp from filling up
     return meta
@@ -164,6 +189,8 @@ def _with_urls(request: Request, meta: dict) -> dict:
     for f in meta["frames"]:
         f = dict(f)
         f["data"] = str(request.url_for("blob", blob_id=f.pop("blob")))
+        if "noise_blob" in f:
+            f["noise"] = str(request.url_for("blob", blob_id=f.pop("noise_blob")))
         out["frames"].append(f)
     return out
 
@@ -194,6 +221,57 @@ def frames(request: Request, ra: float = RA, dec: float = DEC, fov: float = FOV,
     if meta is None:
         meta = _build_frames(ra, dec, fov, band, matched=matched)
     return _with_urls(request, meta)
+
+
+@app.get("/api/frames.fits", response_class=FileResponse,
+         responses={200: {"content": {"application/fits": {}}, "description": "Multi-extension FITS"}})
+def frames_fits(ra: float = RA, dec: float = DEC, fov: float = FOV, band: Band = "D2",
+                matched: bool = Query(False, description="Matched-wavelength frames (see /api/frames)")):
+    """The /api/frames product as one FITS file for use in DS9 / astropy: per pass an IMAGE extension (MJy/sr,
+    north-up TAN WCS) and a NOISE extension (1 sigma), with times, wavelengths and exposure counts in the headers.
+    Builds the frames first if needed (slow for a new position: prefer /api/frames?async=1 first)."""
+    from astropy.io import fits as afits
+
+    meta = _build_frames(ra, dec, fov, band, matched=matched)
+    w, h = meta["wcs"]["width"], meta["wcs"]["height"]
+    hdr = pipeline.output_grid(ra, dec, fov).to_header()
+    prim = afits.PrimaryHDU()
+    ph = prim.header
+    ph["ORIGIN"] = ("SPHEREx Sky Explorer", "NASA Space Apps 2026")
+    ph["TELESCOP"] = "SPHEREx"
+    ph["DETECTOR"] = (band, "SPHEREx detector band")
+    ph["RELEASE"] = (meta.get("release") or "", "SPHEREx data release tag")
+    ph["MATCHED"] = (bool(meta.get("matched")), "same bandpass in every pass")
+    if meta.get("matched_channels"):
+        ph["NCHAN"] = (len(meta["matched_channels"]), "channels averaged in every pass")
+        ph["COMMENT"] = "Matched channels: " + ", ".join(meta["matched_channels"])
+    ph["NPASS"] = len(meta["frames"])
+    ph["BUNIT"] = meta.get("units", "MJy/sr")
+    ph["COMMENT"] = "Built from SPHEREx level-2 images (IRSA / public S3 mirror). Row order: FITS (south up)."
+    hdus = [prim]
+    for f in meta["frames"]:
+        for kind, key in (("IMAGE", "blob"), ("NOISE", "noise_blob")):
+            if key not in f:
+                continue
+            arr = np.fromfile(_blob_dir() / f"{f[key]}.bin", dtype="<f4").reshape(h, w)[::-1]   # back to FITS rows
+            e = afits.ImageHDU(arr, header=hdr.copy(), name=f"{kind}_{f['epoch_label']}")
+            eh = e.header
+            eh["BUNIT"] = meta.get("units", "MJy/sr")
+            eh["EPOCH"] = (f["epoch_label"], "survey pass")
+            eh["MJD-BEG"], eh["MJD-END"] = f["mjd_start"], f["mjd_end"]
+            eh["MJD-AVG"] = (f.get("mjd_mean"), "mean exposure time")
+            eh["NEXP"] = (f["n_exposures"], "exposures co-added")
+            if f.get("lam_eff_um") is not None:
+                eh["LAMEFF"] = (f["lam_eff_um"], "[um] effective wavelength at the target")
+            if f.get("noise_scale") is not None:
+                eh["NOISESCL"] = (f["noise_scale"], "factor applied to the co-add error map")
+            if f.get("astrometry_rms_arcsec") is not None:
+                eh["ASTRMS"] = (f["astrometry_rms_arcsec"], "[arcsec] Gaia star scatter about registration")
+            hdus.append(e)
+    name = f"spherex_{band}{'_matched' if matched else ''}_{ra:.4f}_{dec:+.4f}.fits"
+    path = _blob_dir() / f"{cache.cache_key('fits', ra, dec, fov, band + str(matched), meta.get('release') or '')}.fits"
+    afits.HDUList(hdus).writeto(path, overwrite=True)
+    return FileResponse(path, media_type="application/fits", filename=name)
 
 
 @app.get("/api/jobs/{job_id}", response_model=JobStatus, name="job_status")
@@ -444,6 +522,51 @@ def motion_view(request: Request, ra: float = RA, dec: float = DEC,
         cat = {"pmra": pmra, "pmdec": pmdec, "catalog": "request"} if track.source == "request" else None
         m = motion.build_motion(stamps, bins, track, _field(ra, dec, DEFAULT_FOV), fit_parallax, cat)
         return {"ra": ra, "dec": dec, "det": ",".join(f"D{d}" for d in dets), **m}
+
+    return _serve_product(request, key, build, async_)
+
+
+@app.get("/api/stack", responses={202: {"model": JobStatus}})
+def stack_view(request: Request, ra: float = RA, dec: float = DEC, fov: float = FOV, band: Band = "D6",
+               pmra: float | None = PMRA, pmdec: float | None = PMDEC, epoch: float | None = EPOCH, async_: bool = ASYNC):
+    """Shift-and-stack: every exposure of the band co-added in the frame moving with the target (proper motion
+    from the request, or Gaia DR3 when the target matches it), next to the plain static stack, both centred on
+    the target at the mean exposure time. A real mover sharpens (higher target_snr); field stars streak."""
+    key = _product_key("stack", ra, dec, fov, band, pmra, pmdec, epoch, "v1")
+
+    def build(progress):
+        stamps, _ = pipeline.load_stamps(ra, dec, fov, band, progress)
+        track = photometry.track_for(ra, dec, pmra, pmdec, epoch)
+        if not (track.pmra or track.pmdec):
+            raise pipeline.NoCoverage("No proper motion for this target: pass pmra/pmdec (e.g. from /api/resolve).")
+        r = stack.shift_and_stack(stamps, track, fov)
+        arrays = [r["static"].pop("array"), r["comoving"].pop("array")]
+        r["static"]["blob"], r["comoving"]["blob"] = 0, 1
+        return ({"ra": ra, "dec": dec, "fov": fov, "band": band, "units": cfg["image_unit"], "release": cfg["release_tag"],
+                 "track": {"source": track.source, "pmra": track.pmra, "pmdec": track.pmdec, "gaia_id": track.gaia_id},
+                 **r}, arrays)
+
+    return _serve_product(request, key, build, async_)
+
+
+@app.get("/api/movers", responses={202: {"model": JobStatus}})
+def movers(request: Request, ra: float = RA, dec: float = DEC, fov: float = FOV, band: Band = "D6",
+           max_pm: float = Query(12.0, gt=0, le=30, description="Largest proper motion searched, arcsec/yr"),
+           snr_min: float = Query(5.0, ge=3, le=50, description="Detection threshold per pass frame, sigma"),
+           async_: bool = ASYNC):
+    """Discovery mode: every source tracked across passes, its fitted proper motion, and a Gaia DR3 cross-match.
+    `candidates` = moving at > 5 sigma with no Gaia counterpart (e.g. WISE 0855 in D6). `null_test` = PM pulls of
+    Gaia-matched field sources. Built from the same frames as /api/frames (shares their cache)."""
+    key = _product_key("movers", ra, dec, fov, band, max_pm, snr_min, "v1")
+
+    def build(progress):
+        meta = _build_frames(ra, dec, fov, band, progress)
+        load = lambda b: np.fromfile(_blob_dir() / f"{b}.bin", dtype="<f4").reshape(meta["wcs"]["height"], meta["wcs"]["width"])  # noqa: E731
+        arrays = [load(f["blob"]) for f in meta["frames"]]
+        noise = [load(f["noise_blob"]) for f in meta["frames"]]
+        res = discovery.find_movers(meta["frames"], arrays, noise, pipeline.output_grid(ra, dec, fov), _field(ra, dec, fov),
+                                    max_pm_arcsec_yr=max_pm, snr_min=snr_min)
+        return {"ra": ra, "dec": dec, "fov": fov, "band": band, "release": cfg["release_tag"], **res}
 
     return _serve_product(request, key, build, async_)
 

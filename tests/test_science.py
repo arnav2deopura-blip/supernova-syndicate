@@ -12,7 +12,7 @@ from astropy.io import fits
 from astropy.wcs import WCS, FITSFixedWarning
 from fastapi.testclient import TestClient
 
-from backend import catalogs, channels, cube, lightcurve, motion, photometry, pipeline, psf, s3_archive
+from backend import catalogs, channels, cube, discovery, lightcurve, motion, photometry, pipeline, psf, s3_archive
 from backend.config import get_config
 from backend.fits_processor import PreparedStamp, prepare_stamp, wavelength_at
 from backend.photometry import PhotPoint
@@ -224,6 +224,102 @@ def test_matched_frames_need_a_channel_common_to_every_pass():
     st = _red_star_stamps({60800: [3, 4], 61000: [9]})
     with pytest.raises(pipeline.NoCoverage, match="E1: C03, C04; E2: C09"):
         cube.build_matched_frames(150.0, 10.0, 0.06, "D6", stamps=st, bins=MIX_BINS)
+
+
+# ------------------------------------------------------------------ noise maps + frame QC
+
+def _field_stamps(shift_px=0.0, n_per_pass=3, seed0=0):
+    """Two passes of a field with 6 bright stars; pass 2's WCS is off by shift_px native px in x."""
+    rng = np.random.default_rng(42)
+    stars = [(150.0 + dx / 3600, 10.0 + dy / 3600, 400.0) for dx, dy in rng.uniform(-80, 80, (6, 2))]
+    out = []
+    for k, mjd in enumerate([60800.0, 61000.0]):
+        for j in range(n_per_pass):
+            s = synth_stamp(stars=stars, noise=1.0, seed=seed0 + 10 * k + j, mjd=mjd + j)
+            if k == 1 and shift_px:
+                s.wcs.wcs.crpix = s.wcs.wcs.crpix + [shift_px, 0]
+            out.append(s)
+    field = [{"id": f"G{i}", "ra": a, "dec": d, "pmra": 0.0, "pmdec": 0.0, "mag": 12.0} for i, (a, d, _) in enumerate(stars)]
+    return out, field
+
+
+def test_noise_maps_give_unit_scatter_sigma_difference():
+    st, _ = _field_stamps()
+    p = pipeline.coadd_epochs(st, 150.0, 10.0, 0.06, "D2", bins=MIX_BINS)
+    assert p.noise is not None and len(p.noise) == 2 and all(f["noise_scale"] > 0 for f in p.meta["frames"])
+    r = (p.arrays[1] - p.arrays[0]) / np.sqrt(p.noise[0] ** 2 + p.noise[1] ** 2)
+    r = r[np.isfinite(r)]
+    assert 0.85 < 1.4826 * np.median(np.abs(r - np.median(r))) < 1.15
+
+
+def test_frame_astrometry_detects_a_registration_error():
+    good, field = _field_stamps()
+    p = pipeline.add_frame_qc(pipeline.coadd_epochs(good, 150.0, 10.0, 0.06, "D2", bins=MIX_BINS), 150.0, 10.0, 0.06, field)
+    for f in p.meta["frames"]:
+        a = f["astrometry"]
+        assert a["n_ref"] >= 4 and abs(a["dra_arcsec"]) < 0.5 and abs(a["ddec_arcsec"]) < 0.5
+        assert f["astrometry_rms_arcsec"] < 0.5 and f["target_flagged"] is False
+    bad, _ = _field_stamps(shift_px=0.5)   # 0.5 native px = 3.1" WCS error in pass 2
+    p = pipeline.add_frame_qc(pipeline.coadd_epochs(bad, 150.0, 10.0, 0.06, "D2", bins=MIX_BINS), 150.0, 10.0, 0.06, field)
+    off = [math.hypot(f["astrometry"]["dra_arcsec"], f["astrometry"]["ddec_arcsec"]) for f in p.meta["frames"]]
+    assert off[0] < 0.5 and 2.0 < off[1] < 4.2
+
+
+# ------------------------------------------------------------------ discovery (movers not in Gaia)
+
+DISC_MJDS = [60800.0, 61000.0, 61200.0]
+DISC_BINS = [(m - 10, m + 10) for m in DISC_MJDS]
+
+
+def _discovery_field(mjds=DISC_MJDS):
+    """6 stationary Gaia stars, a Gaia-listed mover (+6"/yr east) and a mover Gaia lacks (8"/yr, to the
+    north-west, faint: S/N ~ 10 per pass), 3 exposures per pass."""
+    rng = np.random.default_rng(7)
+    cosd = math.cos(math.radians(10.0))
+    fixed = [(150.0 + dx / 3600 / cosd, 10.0 + dy / 3600, 400.0) for dx, dy in rng.uniform(-90, 90, (6, 2))]
+    gm0, nm0 = (150.0 - 40 / 3600 / cosd, 10.0 + 30 / 3600), (150.0 + 35 / 3600 / cosd, 10.0 - 45 / 3600)
+    stamps = []
+    for k, mjd in enumerate(mjds):
+        yr = (mjd - mjds[0]) / 365.25
+        gm = (gm0[0] + 6.0 * yr / 3600 / cosd, gm0[1], 300.0)
+        nm = (nm0[0] - 5.6 * yr / 3600 / cosd, nm0[1] + 5.6 * yr / 3600, 60.0)
+        for j in range(3):
+            stamps.append(synth_stamp(stars=fixed + [gm, nm], noise=1.0, seed=100 * k + j, mjd=mjd + j * 0.5))
+    y0 = catalogs.mjd_to_year(mjds[0])
+    field = [{"id": f"G{i}", "ra": a, "dec": d, "pmra": 0.0, "pmdec": 0.0, "mag": 13.0} for i, (a, d, _) in enumerate(fixed)]
+    # Gaia mover: position at J2016 so that propagation lands on gm0 at the first pass
+    g_ra, g_dec = catalogs.propagate(gm0[0], gm0[1], 6000.0, 0.0, y0, catalogs.GAIA_EPOCH)
+    field.append({"id": "GMOVER", "ra": g_ra, "dec": g_dec, "pmra": 6000.0, "pmdec": 0.0, "mag": 14.0})
+    return stamps, field, nm0
+
+
+def _movers(stamps, field, bins):
+    p = pipeline.coadd_epochs(stamps, 150.0, 10.0, 0.06, "D6", bins=bins)
+    return discovery.find_movers(p.meta["frames"], p.arrays, p.noise, pipeline.output_grid(150.0, 10.0, 0.06), field)
+
+
+def test_discovery_finds_the_mover_gaia_lacks():
+    stamps, field, nm0 = _discovery_field()
+    r = _movers(stamps, field, DISC_BINS)
+    by = {t["status"]: [] for t in r["tracks"]}
+    for t in r["tracks"]:
+        by[t["status"]].append(t)
+    assert len(by.get("candidate", [])) == 1, [(t["status"], t["pm"]) for t in r["tracks"]]
+    c = by["candidate"][0]
+    assert c["gaia"] is None and c["pm_sigma"] > 5
+    assert abs(c["pmra"] - (-5600)) < 3 * c["pm_err"] and abs(c["pmdec"] - 5600) < 3 * c["pm_err"]
+    km = [t for t in by.get("known_mover", []) if t["gaia"]["id"] == "GMOVER"]
+    assert len(km) == 1 and abs(km[0]["pmra"] - 6000) < 3 * km[0]["pm_err"]
+    assert len(by.get("stationary", [])) == 6
+    assert r["candidates"] == [c["id"]]
+
+
+def test_discovery_needs_three_passes_for_candidates():
+    stamps, field, _ = _discovery_field(DISC_MJDS[:2])
+    r = _movers(stamps, field, DISC_BINS[:2])
+    assert r["candidates"] == [] and r["note"]
+    assert all(t["status"] != "candidate" for t in r["tracks"])
+    assert any(t["status"] == "known_mover" and t["gaia"]["id"] == "GMOVER" for t in r["tracks"])
 
 # ------------------------------------------------------------------ index orientation (R Dra fix)
 
@@ -516,6 +612,37 @@ def test_frames_matched_endpoint_is_cached_separately(offline_products):
     arr = np.frombuffer(c.get(matched["frames"][0]["data"]).content, "<f4")
     assert arr.size == matched["wcs"]["width"] * matched["wcs"]["height"]
     assert c.get("/api/frames?ra=150&dec=10&fov=0.06&band=D6&matched=1&async=1").status_code == 200   # cached
+
+def test_frames_fits_export(offline_products):
+    import io
+    c = TestClient(app)
+    r = c.get("/api/frames.fits?ra=150&dec=10&fov=0.06&band=D6&matched=1")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("application/fits")
+    with fits.open(io.BytesIO(r.content)) as h:
+        names = [x.name for x in h]
+        assert names[0] == "PRIMARY" and "IMAGE_E1" in names and "NOISE_E2" in names
+        assert h[0].header["MATCHED"] is True and h[0].header["NPASS"] == 2
+        img = h["IMAGE_E1"]
+        assert img.header["CTYPE1"] == "RA---TAN" and img.header["NEXP"] >= 1 and img.header["BUNIT"] == "MJy/sr"
+        body = c.get("/api/frames?ra=150&dec=10&fov=0.06&band=D6&matched=1").json()
+        blob = np.frombuffer(c.get(body["frames"][0]["data"]).content, "<f4").reshape(img.data.shape)
+        np.testing.assert_array_equal(np.nan_to_num(img.data[::-1]), np.nan_to_num(blob))   # FITS rows = flipped
+
+
+def test_stack_endpoint_sharpens_a_mover(offline_products, monkeypatch):
+    """Stamps whose star moves 20"/yr (3 smeared PSFs in a static stack): the co-moving stack's S/N is higher.
+    At 8"/yr over 400 days the smear is ~1 PSF FWHM and the gain only ~5-20% (as for WISE 0855)."""
+    cosd = math.cos(math.radians(10.0))
+    st = []
+    for k, mjd in enumerate([60800.0, 61000.0, 61200.0]):
+        yr = (mjd - 61000.0) / 365.25
+        st += [synth_stamp(det=6, mjd=mjd + j, seed=10 * k + j, noise=1.0,
+                           stars=[(150.0 - 20.0 * yr / 3600 / cosd, 10.0, 60.0)]) for j in range(3)]
+    monkeypatch.setattr(pipeline, "load_stamps", lambda *a, **k: (st, [(m - 10, m + 10) for m in (60800, 61000, 61200)]))
+    from backend.catalogs import mjd_to_year
+    b = TestClient(app).get(f"/api/stack?ra=150&dec=10&fov=0.06&band=D6&pmra=-20000&pmdec=0&epoch={mjd_to_year(61001.0)}").json()
+    assert b["comoving"]["target_snr"] > 1.3 * b["static"]["target_snr"]
+    assert b["comoving"]["data"].startswith("http") and b["smear_arcsec"] > 20
 
 def test_spectrum_and_ratio_endpoint(offline_products):
     body = TestClient(app).get("/api/spectrum?ra=150&dec=10&det=D6&pmra=0&pmdec=0&compare=E1").json()

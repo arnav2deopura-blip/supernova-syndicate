@@ -41,6 +41,13 @@ class FrameChannel(BaseModel):
     lam_target_um: float = Field(description="Mean wavelength at the target of this channel's exposures in this pass")
 
 
+class FrameAstrometry(BaseModel):
+    n_ref: int = Field(description="Bright isolated Gaia DR3 stars centroided in this frame")
+    dra_arcsec: Optional[float] = Field(None, description="Median offset frame - Gaia (at mjd_mean), east")
+    ddec_arcsec: Optional[float] = Field(None, description="Median offset frame - Gaia, north")
+    rms_arcsec: Optional[float] = None
+
+
 class Frame(BaseModel):
     epoch_label: str
     mjd_start: float
@@ -58,6 +65,14 @@ class Frame(BaseModel):
     lam_eff_um: Optional[float] = Field(None, description="Mean of lam_um")
     target_flags: Optional[list[str]] = Field(None, description="Flag names touching the target in any exposure")
     obs_ids: Optional[list[str]] = None
+    noise: Optional[str] = Field(None, description="URL of the 1-sigma map (same layout as data, MJy/sr): "
+                                 "difference in sigma = (A - B) / sqrt(noiseA^2 + noiseB^2)")
+    target_flagged: Optional[bool] = Field(None, description="A photometry-reject flag (e.g. OVERFLOW) touches the target")
+    noise_scale: Optional[float] = Field(None, description="Factor applied to this frame's co-add error map so "
+                                         "sigma-unit differences have unit scatter (absent with one frame)")
+    astrometry: Optional[FrameAstrometry] = None
+    astrometry_rms_arcsec: Optional[float] = Field(None, description="Per-star scatter of Gaia stars about the "
+                                                   "registration of this frame, arcsec")
     # matched=1 only
     n_exposures_dropped: Optional[int] = Field(None, description="Exposures in this pass whose channel is not "
                                                "observed in every pass, left out to keep the bandpass the same")

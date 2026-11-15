@@ -1,14 +1,14 @@
 # Validation — five test targets
 
-Owner: B. Real SPHEREx DR1 + QR3 level-2 data, through the same pipeline the API serves. Positions come from CDS Sesame (SIMBAD) plus proper motion. Figure: `docs/img/presets_check.png` shows the first pass, the last pass, and last − first. Circles mark the proper-motion prediction at each pass's mean exposure time.
+Owner: B. Real SPHEREx DR1 + QR3 level-2 data, through the same pipeline the API serves. Positions come from CDS Sesame (SIMBAD) plus proper motion. Figure: `docs/img/presets_check.png` shows the first pass, the last pass, and last − first in noise units (matched-wavelength frames, asinh colour scale). Circles mark the proper-motion prediction at each pass's mean exposure time. All figures: `python scripts/make_figures.py` (see the Figures section at the end).
 
 | Target | Band (λ at target) | Passes, exposures | Result | Evidence |
 |---|---|---|---|---|
 | Barnard's Star | D2 (1.35–1.41 µm) | E1 18, E2 18, E3 25 | ✅ **Moves north**: clean +/− dipole in E3 − E1, matching Gaia's +10.4″/yr. Saturated core (OVERFLOW/BLOOM) in every detector, so read position from wing fits/centroids, not the brightest pixel. Measured μ (D5+D6): 10341 ± 210 mas/yr | Diff panel; `test_frames_end_to_end_barnard_moves_north` |
 | ε Indi B | D3 (1.97–2.07 µm) | E1 25, E2 23, E3 12, E4 34 | ✅ Detected at 234σ. Shifts along the predicted track between E1 and E4 | Diff panel |
-| WISE 0855−0714 | D6 (4.72–4.94 µm) | E1 3, E2 20, E3 21 | ✅ **Detected** at 20σ in E3 (3.6σ in the 3-exposure E1), at the proper-motion-predicted position. Motion visible in E3 − E1 | Diff panel; S/N from `frontend/precomputed/wise-0855` |
-| RW Aurigae | D2 (1.35–1.37 µm) | E1 18, E2 18, E3 18 | ✅ **Brightens**: peak 102 → 157 MJy/sr (+54%) E1 → E3, single-sign residual, no dipole. λ_eff differs by only 0.02 µm, so this is very likely real variability; aperture photometry (phase 3) will quantify it | Diff panel |
-| R Draconis | D2 (1.34–1.43 µm) | E1 9, E3 10 (7 passes exist across detectors) | ⚠️ Loads and blinks, but only 2 D2 passes. Near the north ecliptic pole there are ~6,600 candidate observations; the 1,500-observation search cap kept 826 exposures, mostly on D3/D6 (~266 each) and only 19 on D2. **Fix (phase 3/4):** pick polar candidates per detector before spending the cap, so each band gets an even time series | `frontend/precomputed/r-dra` |
+| WISE 0855−0714 | D6 (4.72–4.94 µm; matched 4.89–4.91) | E1 3, E2 20, E3 21 | ✅ **Detected** at 20σ in E3 (3.6σ in the 3-exposure E1), at the proper-motion-predicted position. Motion visible in E3 − E1, and **rediscovered blind by `/api/movers` as the only moving source in the field that Gaia lacks** | Diff panel; `discovery_wise0855.png` |
+| RW Aurigae | D2 (1.35–1.37 µm) | E1 18, E2 18, E3 18 | ✅ **Brightens +28 %** E1 → E3 (template light curve; 8 comparison stars flat to 1.3 %). Single-sign residual, no dipole, also in matched-wavelength frames | Diff panel; `rwaur_lightcurve.png` |
+| R Draconis | D2 (1.35–1.36 µm matched) | E1 29, E3 35, E7 19 (per-detector candidate budget) | ✅ **Fades**: the whole halo is a single-sign negative residual E7 − E1 in matched frames (a Mira past maximum). ⚠️ Saturated: photometry `reliable: false`, so no light-curve numbers are claimed | Diff panel; `frontend/precomputed/r-dra` |
 
 ## Astrometry
 
@@ -133,10 +133,49 @@ Re-run it after any pipeline change and update this table.
   and changes by < 2 % in matched ones (`test_matched_frames_remove_bandpass_mix`). Equal weight per
   channel (`test_matched_frames_equal_weight_per_channel`).
 
+### Noise maps and frame registration (every `/api/frames` product)
+
+- **σ-difference images:** per-frame noise factors are solved from every pass pair. With 3 passes the pair
+  scatter of `(B − A)/σ` is 0.98–1.00 for all presets, plain and matched. ε Indi B (4 passes) can't be fit
+  exactly by one factor per frame: pairs scatter 0.7–1.9σ (spatially varying noise in its E3/E4 coverage).
+  Calibrated factors are 0.2–1.2 × the raw co-add error (bilinear reprojection smooths noise).
+- **Frame registration vs Gaia** (median offset, per-star scatter): Barnard D2 0.1–0.2″ / 0.10–0.24″ (10 stars);
+  ε Indi B D3 0.1–0.6″ / 0.03–0.12″ (2–3 stars); WISE 0855 D6 0.1–0.35″ / 0.25–0.32″ (4–5 stars); RW Aur D2
+  0.05–0.2″ / 0.21–0.34″ (5 stars); R Dra: no usable reference stars. 0.3″ ≈ 0.05 native px.
+  Synthetic check: a 3.1″ WCS error in one pass is reported as 2–4″ (`test_frame_astrometry_detects_a_registration_error`).
+
+### Discovery mode (`/api/movers`) and the ensemble null test
+
+| Target field | Tracks | Result |
+|---|---|---|
+| WISE 0855 D6 | 15 | **1 candidate = WISE 0855** (not in Gaia): μ = (−7.96, +2.64) ± 0.77″/yr, 10.8σ; SIMBAD (−8.12, +0.67): 0.2σ / 2.5σ per component |
+| Barnard D2 | 121 | Barnard = `known_mover`, (0.80, 10.86) ± 0.87″/yr vs Gaia (−0.80, 10.36). (At a slightly different centre, a split saturated core linked into a second track; the artefact rule relabels it.) |
+| ε Indi B D3 | 68 | ε Indi B = `known_mover`, (3.45, −2.50) ± 0.38″/yr vs Gaia (3.98, −2.47) |
+| RW Aur D2 | 131 | All stationary, no candidates |
+| R Dra D2 | 11 | 3 halo pieces of the saturated Mira → `artefact_near_bright_star`; no candidates |
+
+- **No false candidates in four fields; the one real candidate is a real Y dwarf.** Thresholds: 5σ detection,
+  5σ motion, ≥ 3 passes, Gaia match 3.5″ at every pass.
+- **Ensemble null test (180 Gaia stars, 5 fields):** (SPHEREx − Gaia) PM / error has robust width **0.90**
+  (unit = honest errors), median offsets ≤ 0.3σ. Per field: Barnard 0.61/1.05 (84 stars), ε Indi B 1.04/1.07,
+  RW Aur 0.96/0.71, WISE 0855 0.45/0.17, R Dra 0.53/0.58 (RA/Dec). Per-pass co-add positions give ~0.2–0.6″/yr
+  precision for field stars, an order of magnitude coarser than `/api/motion`'s per-exposure ePSF fits.
+- Synthetic: a faint non-Gaia mover among Gaia stars is the only candidate and its PM is recovered within 3σ
+  (`test_discovery_finds_the_mover_gaia_lacks`); with 2 passes nothing is reported as a candidate.
+
+### Shift-and-stack (`/api/stack`)
+
+| Target | Smear over the data | Static S/N | Co-moving S/N |
+|---|---|---|---|
+| WISE 0855 D6 | 8.3″ | 17.6 | **20.6** (+17 %) |
+| ε Indi B D3 | 6.6″ | 195 | **231** (+19 %) |
+| Barnard D5 | 11.3″ | 22 954 | **38 686** (+68 %) |
+
+The smear is ~1 PSF FWHM for these targets, so the gain is modest; it grows with speed and baseline (synthetic
+20″/yr mover: > +30 %, `test_stack_endpoint_sharpens_a_mover`). WISE 0855 D5 shows no gain (17.3 vs 17.4).
+
 ### Not yet validated
 
-- Ensemble proper-motion null test on field stars (needs per-source motion in the field; same code as
-  discovery mode).
 - R Dra period vs AAVSO: needs an unsaturated band.
 
 ## Known limits
@@ -146,3 +185,16 @@ Re-run it after any pipeline change and update this table.
 - **Saturation:** Barnard's Star (every detector checked: D1–D6), RW Aur (D2) and R Dra (D2) have OVERFLOW cores. Images stay usable. Photometry and astrometry fall back to ePSF wing fits (flagged): fine for RW Aur (~10 % per point), degraded for Barnard, useless for R Dra (`reliable: false`).
 - **Faintest detection so far:** WISE 0855 in D5/D6 (~5σ per exposure). It is invisible below 3.8 µm, as expected for a Y dwarf.
 - **Blending:** with 6″ pixels, a neighbour within ~30″ biases a faint target's photometry either way: close ones add light; at ~2 px the wing is absorbed into the fitted background and the target comes out low. Forced fits deblend Gaia sources; sources missing from Gaia (other red brown dwarfs, galaxies) are not modelled. CatWISE would close that gap.
+
+## Figures (`python scripts/make_figures.py`, from the baked presets only)
+
+| File | Shows | Pitch slide |
+|---|---|---|
+| `docs/img/barnard_blink.gif`, `barnard_strip.png` | Barnard's Star stepping north over three D2 passes, Gaia rings | 2 |
+| `docs/img/presets_check.png` | Five targets: first, last, difference in σ (matched wavelengths) | 4, 6 |
+| `docs/img/matched_wavelengths.png` | Per-pass wavelength spread, plain vs matched (237 → 20 nm for WISE 0855) | 3 |
+| `docs/img/wise0855_sed.png` | WISE 0855 across all 102 channels: dark below 3.8 µm, bright at 4–5 µm | 5 |
+| `docs/img/discovery_wise0855.png` | Blind rediscovery of WISE 0855 + 180-star null test | 7 |
+| `docs/img/motion_validation.png` | SPHEREx-only proper motions vs Gaia / SIMBAD | 6 |
+| `docs/img/rwaur_lightcurve.png` | RW Aur +28 % with flat comparison stars | 6 |
+

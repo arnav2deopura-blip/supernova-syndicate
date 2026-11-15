@@ -15,6 +15,7 @@ archive:
   s3_releases:            # newest last; level-2 files live under <release>/level2/<week>/<proc>/<det>/
     - dr1                 # 2025W17 .. 2026W20
     - qr3                 # 2026W20 .. 2026W40 (as of 14 Nov 2026)
+  s3_superseded: [qr2]    # on the mirror but replaced by dr1; never flagged as new
   spectral_channels: dr1/spectral_channels/cal-sch-v2-2026-229/spectral_channels_spx_cal-sch-v2-2026-229.fits
   prefer: tap              # tap = IRSA TAP first, S3 header scan as fallback; s3 = skip TAP
   tap_timeout_s: 20
