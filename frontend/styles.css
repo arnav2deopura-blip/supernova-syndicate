@@ -390,3 +390,6 @@ body.embed footer { padding: 4px 8px; font-size: 0.75rem; }
 .science-note { color: var(--muted); font-size: 0.75rem; margin: 4px 0; }
 .science-warning { color: var(--warn); }
 .science-provenance { font-size: 0.8rem; margin: 0 0 4px; }
+
+.backend-status { margin: 0 0 4px; }
+.backend-status.bad { color: var(--warn); }

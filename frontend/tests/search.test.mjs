@@ -207,7 +207,8 @@ test('a failed job and a missing completed result surface clear errors', async (
 });
 
 test('a real not-found response does not fall back to unrelated saved observations', async (t) => {
-  const calls = mockBrowser(t, () => json({ error: 'not_found', message: 'No data here.' }, 404));
+  // ?fresh=1: ask the backend even for a test target that has saved observations
+  const calls = mockBrowser(t, () => json({ error: 'not_found', message: 'No data here.' }, 404), '?fresh=1');
   await assert.rejects(api.frames(query(), { preset: 'barnards-star' }), apiFailure('not_found'));
   assert.equal(calls.length, 1);
   assert.ok(calls[0].startsWith(`${API_BASE}/api/frames?`));
@@ -216,7 +217,7 @@ test('a real not-found response does not fall back to unrelated saved observatio
 test('an outage may use matching saved observations, while demo data is explicit', async (t) => {
   const calls = mockBrowser(t, (url) => url.startsWith(API_BASE)
     ? json({ error: 'upstream_unavailable', message: 'Archive is unavailable.' }, 503)
-    : json(frames()));
+    : json(frames()), '?fresh=1');
   assert.equal((await api.frames(matchedQuery(), { preset: 'barnards-star' }))._provenance.kind, 'precomputed');
   assert.equal(calls.length, 2);
   location.search = '?mock=1';
@@ -230,4 +231,29 @@ test('an already cancelled search never starts a request', async (t) => {
   const controller = new AbortController(); controller.abort();
   await assert.rejects(api.frames(query(), { signal: controller.signal }), { name: 'AbortError' });
   assert.equal(calls.length, 0);
+});
+
+test('a test target uses its matching saved observations first, without calling the backend', async (t) => {
+  const calls = mockBrowser(t, (url) => {
+    assert.ok(!url.startsWith(API_BASE), 'no backend call');
+    return json(frames());
+  });
+  const result = await api.frames(matchedQuery(), { preset: 'barnards-star' });
+  assert.equal(result._provenance.kind, 'precomputed');
+  assert.deepEqual(calls, ['precomputed/barnards-star/frames_matched_D2.json']);
+});
+
+test('a saved bake that does not match the request goes to the backend instead', async (t) => {
+  const calls = mockBrowser(t, (url) => (url.startsWith(API_BASE) ? json(frames()) : json({ ...frames(), fov: 0.1 })));
+  const result = await api.frames(matchedQuery(), { preset: 'barnards-star' });
+  assert.equal(result._provenance.kind, 'live');
+  assert.equal(calls.length, 2);
+});
+
+test('the saved target spectrum is never shown for a click elsewhere in the field', async (t) => {
+  const spectrum = { ra: 269.4486, dec: 4.7394, points: [] };
+  mockBrowser(t, (url) => (url.startsWith(API_BASE) ? json({ error: 'upstream_unavailable' }, 503) : json(spectrum)));
+  const near = await api.spectrum({ ra: '269.448700', dec: '4.739400', det: 'D2' }, { preset: 'barnards-star' });
+  assert.equal(near._provenance.kind, 'precomputed');
+  await assert.rejects(api.spectrum({ ra: '269.460000', dec: '4.739400', det: 'D2' }, { preset: 'barnards-star' }), apiFailure('offline'));
 });

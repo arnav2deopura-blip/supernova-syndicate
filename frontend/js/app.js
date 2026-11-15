@@ -6,7 +6,7 @@
 // The viewer: Play passes (blink), Difference and Changes (σ) between any two passes A/B, Sum, and Colours
 // (the 17 channels of a band). Changes are circled automatically (js/changes.js) and listed as Events.
 // URL: ?mode=&ra=&dec=&fov=&band=&matched=&name=&view=&a=&b=&ch=lo-hi&tour=1&embed=1
-import { api, setFallbackHandler } from "./api.js";
+import { api, setFallbackHandler, apiLabel, API_BASE, DEPLOYED_API } from "./api.js";
 import { parseCoord } from "./coordinates.js";
 import { Player } from "./player.js";
 import { draw, sumFrames } from "./render.js";
@@ -144,7 +144,8 @@ function sepDeg(ra1, dec1, ra2, dec2) {
   return (2 * Math.asin(Math.min(1, Math.sqrt(h)))) / r;
 }
 /** The preset whose bake sits at this position (so the offline fallback works in every mode). */
-const nearestPreset = (ra, dec) => PRESETS.find((p) => sepDeg(ra, dec, p.ra, p.dec) < 0.01) || null;
+// within 1″: only then are the saved bakes for exactly this field (they are not used for a field merely nearby)
+const nearestPreset = (ra, dec) => PRESETS.find((p) => sepDeg(ra, dec, p.ra, p.dec) < 1 / 3600) || null;
 // case, apostrophes, unicode minus and spacing don't matter ("barnards star", "WISE 0855−0714")
 const normName = (v) => v.toLowerCase().replace(/[’']/g, "").replace(/−/g, "-").trim().replace(/\s+/g, " ");
 const presetByName = (name) => PRESETS.find((p) => [p.name, p.label, p.slug, ...(p.aliases || [])].some((x) => normName(x) === normName(name))) || null;
@@ -404,6 +405,9 @@ function renderBadges() {
   }
   if (isMatched() && state.wl.kind === "detector") out.push(el("span", { class: "badge badge-ok", title: `Channels in every pass: ${state.frames.matched_channels?.join(", ")}`, text: `Fair comparison${state.frames.lam_eff_um ? ` · ${state.frames.lam_eff_um.toFixed(3)} µm` : ""}` }));
   if (state.wl.kind === "range") out.push(el("span", { class: "badge", text: rangeText(state.wl) }));
+  const prov = state.frames?._provenance?.kind;
+  if (prov === "precomputed") out.push(el("span", { class: "badge", title: `Saved observations of this test target (release ${state.frames.release || "?"}), built by the same pipeline as the live backend. Add ?fresh=1 to the URL to rebuild them live.`, text: "Saved observations" }));
+  else if (prov === "live") out.push(el("span", { class: "badge badge-new", title: `Built just now or cached by ${apiLabel()}`, text: "Live" }));
   ui.badges.replaceChildren(...out);
 }
 
@@ -695,7 +699,7 @@ function highlightFilmstrip() {
 // ---- URL state ----
 function writeURL() {
   const url = new URL(location.href);
-  const keep = ["mock", "embed"].filter((k) => url.searchParams.has(k)).map((k) => [k, url.searchParams.get(k)]);
+  const keep = ["mock", "embed", "fresh"].filter((k) => url.searchParams.has(k)).map((k) => [k, url.searchParams.get(k)]);
   url.search = "";
   for (const [k, v] of keep) url.searchParams.set(k, v);
   url.searchParams.set("mode", state.mode);
@@ -807,7 +811,8 @@ async function loadTarget({ ra, dec, label, name = null, pm = null }) {
   }
   state.movers = null;
   state.variability = null;
-  if (state.mode !== "explore" || state.preset) {
+  // a light curve only means something for a named object at the field centre (not an arbitrary patch of sky)
+  if (name || state.preset) {
     api.lightcurve({ ra: q.ra, dec: q.dec, det: q.band }, { preset: state.preset, signal: extra.signal })
       .then((lc) => { if (!extra.signal.aborted) { state.variability = lc; state.adv.lightcurve = lc; computeEvents(); render(); } })
       .catch(() => { /* no light curve here: no variability claim */ });
@@ -1023,7 +1028,8 @@ async function searchName(name, { band } = {}) {
   }
   rememberName(name);
   if (r.name) r.name = r.name.replace(/^NAME\s+/, "");
-  if (preset) r.name = preset.label;
+  // a test target found by name uses its baked position, so the saved observations apply exactly
+  if (preset) { r.name = preset.label; r.ra = preset.ra; r.dec = preset.dec; }
   const pmTotal = Math.hypot(r.pmra || 0, r.pmdec || 0);
   showResult([
     ["Object", r.name || name],
@@ -1251,6 +1257,16 @@ initGlossary();
 // ---- start ----
 let dataThrough = null;
 fillSuggestions();
+// which backend this page talks to, and whether it answers
+const backendStatus = $("backend-status");
+backendStatus.textContent = `Backend: ${apiLabel()} — checking…`;
+api.health().then((h) => {
+  const switchHint = API_BASE === DEPLOYED_API ? "" : " (add ?api=default to the URL to switch back)";
+  backendStatus.textContent = h?.ok
+    ? `Backend: ${apiLabel()} — connected, release ${h.release}${switchHint}.`
+    : `Backend: ${apiLabel()} — not reachable. The five test targets still work from saved data${switchHint}.`;
+  backendStatus.classList.toggle("bad", !h?.ok);
+});
 api.meta({ check: true }).then((m) => {
   dataThrough = m?.index?.data_through || null;
   if (dataThrough) ui.dataSpan.textContent = `SPHEREx data through ${dataThrough}.`;
