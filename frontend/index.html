@@ -51,10 +51,10 @@
         <div class="sky-tools">
           <label>Background <select id="sky-bg"></select></label>
           <label class="slice">Wavelength <span class="slice-row"><input id="sky-slice" type="range" min="1" max="101" value="25"> <output id="sky-slice-label">–</output></span></label>
-          <button type="button" id="sky-draw" aria-pressed="false">Draw box</button>
-          <button type="button" id="sky-view">Use current view</button>
+          <button type="button" id="sky-draw" disabled aria-pressed="false">Draw box</button>
+          <button type="button" id="sky-view" disabled>Use current view</button>
         </div>
-        <p class="hint">Drag to pan, scroll or pinch to zoom. <b>Click</b> to drop a box of the chosen field of view, or <b>Shift+drag</b> (or “Draw box”, then drag) to draw one, up to 0.5°. Orange circles are the test targets.</p>
+        <p class="hint">Drag to pan, scroll or pinch to zoom. <b>Click</b> to drop a box of the chosen field of view, or <b>Shift+drag</b> (or “Draw box”, then drag) to draw one, up to 0.5°. Orange circles select known targets. After selecting a box, press “Compare this region” to load its dated observations below.</p>
         <div class="selection" id="sky-selection">
           <div><span class="k">Cursor</span> <span id="sky-cursor">–</span></div>
           <div><span class="k">Selection</span> <span id="sky-sel">none yet</span></div>
@@ -193,7 +193,7 @@
         <label>Zoom
           <select id="zoom"><option value="1">1×</option><option value="2">2×</option><option value="3">3×</option><option value="4">4×</option></select>
         </label>
-        <button type="button" id="save-png">Save image</button>
+        <span class="k export-label">Export</span><button type="button" id="save-png">Save image</button>
         <button type="button" id="save-movie">Save movie</button>
       </div>
       <details class="display-opts" id="display-opts">
@@ -233,7 +233,7 @@
     </aside>
 
     <details class="advanced" id="advanced">
-      <summary>Advanced: passes, exposures, astrometry, photometry, derived physics, exports</summary>
+      <summary>Advanced: observations, available measurements &amp; exports</summary>
       <div id="adv-body" class="adv-body"><p class="hint">Load a target first.</p></div>
     </details>
   </main>

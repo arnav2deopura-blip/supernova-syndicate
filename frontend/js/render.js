@@ -10,7 +10,10 @@ const CMAPS = {
   diverging: [[33, 102, 172], [247, 247, 247], [178, 24, 43]],
 };
 
+const tables = new Map();
+const sortedValues = new WeakMap();
 function lut(name) {
+  if (tables.has(name)) return tables.get(name);
   const stops = CMAPS[name] || CMAPS.gray;
   const table = new Uint8ClampedArray(256 * 3);
   for (let i = 0; i < 256; i++) {
@@ -19,11 +22,13 @@ function lut(name) {
     const f = t - k;
     for (let c = 0; c < 3; c++) table[i * 3 + c] = stops[k][c] + f * (stops[k + 1][c] - stops[k][c]);
   }
+  tables.set(name,table);
   return table;
 }
 
 function percentile(values, p) {
-  const v = values.filter((x) => x !== null && Number.isFinite(x)).sort((a, b) => a - b);
+  let v=sortedValues.get(values);
+  if (!v) { v=values.filter(x=>x!==null && Number.isFinite(x)).sort((a,b)=>a-b); sortedValues.set(values,v); }
   if (!v.length) return 0;
   return v[Math.min(v.length - 1, Math.max(0, Math.round((p / 100) * (v.length - 1))))];
 }
@@ -46,8 +51,8 @@ export function sumFrames(frames) {
  * Limits come from `limitsFrom` (all frames) so brightness changes between epochs stay visible.
  */
 export function draw(canvas, data, width, height, { stretch = "asinh", cmap = "gray", clip = 99.5, limitsFrom = data, diverging = false, range = null } = {}) {
-  canvas.width = width;
-  canvas.height = height;
+  if (canvas.width !== width) canvas.width=width;
+  if (canvas.height !== height) canvas.height=height;
   const ctx = canvas.getContext("2d");
   const img = ctx.createImageData(width, height);
   const table = lut(diverging ? "diverging" : cmap);

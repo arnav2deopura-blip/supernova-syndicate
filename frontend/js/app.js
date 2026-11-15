@@ -172,12 +172,12 @@ const STAGE_TEXT = {
   stamps: "Downloading image cutouts", coadd: "Co-adding passes", qc: "Checking registration",
 };
 function showProgress(text, job) {
-  ui.progress.hidden = false;
+  ui.progress.hidden = false; document.getElementById("viewer").setAttribute("aria-busy","true");
   if (job && job.total) { ui.progressBar.max = job.total; ui.progressBar.value = job.done; }
   else ui.progressBar.removeAttribute("value");   // indeterminate
   ui.progressText.textContent = text;
 }
-function hideProgress() { ui.progress.hidden = true; }
+function hideProgress() { ui.progress.hidden = true; document.getElementById("viewer").setAttribute("aria-busy","false"); }
 function jobText(job, t0) {
   const what = job.message || STAGE_TEXT[job.stage] || (job.state === "queued" ? "Waiting for a free worker" : "Working");
   const n = job.total ? ` (${job.done}/${job.total})` : "";
@@ -414,6 +414,8 @@ function renderBadges() {
 // ---- rendering ----
 function render() {
   ui.stageEmpty.hidden = !!state.frames;
+  for (const c of [ui.savePng,ui.saveMovie,ui.zoom,ui.showOverlay,ui.showEvents,ui.stretch,ui.cmap,ui.clip,...ui.views]) c.disabled=!state.frames || !!state.recording;
+  updatePlayerUI();
   if (!state.frames) {
     ui.image.getContext("2d").clearRect(0, 0, ui.image.width, ui.image.height);
     ui.overlay.getContext("2d").clearRect(0, 0, ui.overlay.width, ui.overlay.height);
@@ -447,7 +449,7 @@ function render() {
     label = "all passes added";
   } else {
     const f = fr[state.index];
-    draw(ui.image, f.data, wcs.width, wcs.height, { ...opts, limitsFrom: fr.flatMap((x) => x.data) });
+    draw(ui.image, f.data, wcs.width, wcs.height, { ...opts, limitsFrom: state.limitsFor === fr ? state.intensityValues : (state.limitsFor=fr, state.intensityValues=fr.flatMap(x=>x.data)) });
     label = `${f.epoch_label} · ${mjdDate(f.mjd_mean ?? f.mjd_start)} (${state.index + 1}/${fr.length})`;
   }
   ui.frameLabel.textContent = label;
@@ -474,7 +476,7 @@ if (REDUCED_MOTION) player.playing = false;   // respect "reduced motion": start
 function updatePlayerUI() {
   ui.play.textContent = player.playing ? "Pause" : "Play";
   const moving = state.view === "blink" || state.view === "colours";
-  for (const b of [ui.play, ui.prev, ui.next]) b.disabled = !moving || player.count < 2;
+  for (const b of [ui.play, ui.prev, ui.next]) b.disabled = !!state.recording || !moving || player.count < 2;
 }
 
 // ---- timeline strip: passes on a real time axis ----
@@ -632,7 +634,7 @@ async function loadRange(ac) {
       actions: [{ label: "Use the whole band", primary: true, onClick: () => setWavelengths({ kind: "detector" }, { reload: true }) }],
     };
     return state.base;
-  } finally { hideProgress(); }
+  } finally { if (!ac?.signal.aborted) hideProgress(); }
 }
 
 function rememberLams(cube) {
@@ -669,7 +671,7 @@ async function loadColours() {
     } };
     updateNotice();
     render();
-  } finally { hideProgress(); }
+  } finally { if (!ac?.signal.aborted) hideProgress(); }
 }
 function startColours() {
   const n = state.cube.channels.length;
@@ -727,8 +729,11 @@ const fitsURL = () => (state.base?._provenance?.kind === "live" && state.target 
 
 // ---- the one loader every mode ends in ----
 async function loadTarget({ ra, dec, label, name = null, pm = null }) {
+  if (state.recording) { showBanner('A movie is recording. Please wait until the download is ready before changing targets.'); return; }
+  nameAbort?.abort();
   state.jobAbort?.abort();
   state.extraAbort?.abort();
+  state.spectrumAbort?.abort();
   const ac = new AbortController();
   state.jobAbort = ac;
   state.extraAbort = new AbortController();
@@ -744,6 +749,11 @@ async function loadTarget({ ra, dec, label, name = null, pm = null }) {
   ui.showOnSky.hidden = state.mode === "explore";
   syncSky();
 
+  state.frames = state.base = null;
+  state.events=[]; state.spectrum=null; state.pick=null; state.adv={};
+  ui.badges.replaceChildren(); ui.filmstrip.replaceChildren(); ui.notice.hidden=true;
+  player.load(0); render(); renderEvents(); renderTimeline(); refreshAdvanced();
+  ui.targetLabel.textContent=`Loading ${title}…`;
   const t0 = Date.now();
   showProgress("Asking the backend for frames…");
   let frames;
@@ -807,14 +817,14 @@ async function loadTarget({ ra, dec, label, name = null, pm = null }) {
   if (!state.sources) {
     api.overlay({ ra: q.ra, dec: q.dec, fov: q.fov }, { preset: state.preset, signal: extra.signal })
       .then((o) => { if (!extra.signal.aborted) { state.sources = o.sources; computeEvents(); render(); } })
-      .catch(() => { state.sources = null; });
+      .catch(() => { if (!extra.signal.aborted) state.sources = null; });
   }
   state.movers = null;
   state.variability = null;
   // a light curve only means something for a named object at the field centre (not an arbitrary patch of sky)
   if (name || state.preset) {
     api.lightcurve({ ra: q.ra, dec: q.dec, det: q.band }, { preset: state.preset, signal: extra.signal })
-      .then((lc) => { if (!extra.signal.aborted) { state.variability = lc; state.adv.lightcurve = lc; computeEvents(); render(); } })
+      .then((lc) => { if (!extra.signal.aborted) { state.variability = lc; state.adv.lightcurve = lc; computeEvents(); render(); if(ui.advanced.open) refreshAdvanced(); } })
       .catch(() => { /* no light curve here: no variability claim */ });
   }
   api.movers({ ra: q.ra, dec: q.dec, fov: q.fov, band: q.band }, { preset: state.preset, signal: extra.signal })
@@ -826,6 +836,7 @@ async function loadTarget({ ra, dec, label, name = null, pm = null }) {
 ui.cancel.addEventListener("click", () => {
   state.jobAbort?.abort();
   hideProgress();
+  ui.targetLabel.textContent="Search cancelled — choose a target to try again";
   showBanner("Cancelled. The server keeps building this position in the background, so asking again later is faster.");
 });
 
@@ -851,14 +862,14 @@ function loadAdvanced() {
   const get = (key, fn) => {
     if (state.adv[key]) return;
     state.adv[key] = "loading";
-    fn().then((r) => { state.adv[key] = r; }).catch((e) => { if (e.name !== "AbortError") state.adv[key] = { error: e.code === "offline" ? "Needs the live backend for this position." : e.message }; })
-      .finally(() => refreshAdvanced());
+    fn().then((r) => { if (!signal?.aborted) state.adv[key] = r; }).catch((e) => { if (!signal?.aborted && e.name !== "AbortError") state.adv[key] = { error: e.code === "offline" ? "Needs the live backend for this position." : e.message }; })
+      .finally(() => { if (!signal?.aborted) refreshAdvanced(); });
   };
   get("exposures", () => api.exposures({ ...q, fov: state.base.fov }, opts));
   const det = ui.band.value;
   const pm = state.target?.pm;
-  get("motion", () => api.motion({ ...q, det, ...(pm ? { pmra: pm.pmra, pmdec: pm.pmdec, epoch: pm.epoch } : {}) }, opts));
-  get("lightcurve", () => api.lightcurve({ ...q, det }, opts));
+  if (state.target.name || state.preset) get("motion", () => api.motion({ ...q, det, ...(pm ? { pmra: pm.pmra, pmdec: pm.pmdec, epoch: pm.epoch } : {}) }, opts));
+  if (state.target.name || state.preset) get("lightcurve", () => api.lightcurve({ ...q, det }, opts));
   refreshAdvanced();
 }
 function refreshAdvanced() {
@@ -899,34 +910,45 @@ ui.savePng.addEventListener("click", () => {
   });
 });
 ui.saveMovie.addEventListener("click", async () => {
-  if (!state.frames || typeof MediaRecorder === "undefined") {
-    showNotice(ui.notice, { tone: "empty", title: "This browser can't record a movie.", why: "Use Save image, or a recent Chrome, Edge or Firefox." });
-    return;
+  if (!state.frames) return;
+  if (typeof MediaRecorder === "undefined" || !ui.image.captureStream) {
+    showBanner('Movie export is unavailable in this browser. Save an image instead.'); return;
   }
-  const view = state.view === "colours" && state.cube?.channels ? "colours" : "blink";
-  if (state.view !== view) setView(view, { silent: true });
-  const n = player.count, fps = +ui.speed.value;
-  const wasPlaying = player.playing;
-  if (player.playing) player.toggle();
-  const canvas = composite(); const ctx = canvas.getContext("2d");
-  const type = ["video/webm;codecs=vp9", "video/webm", "video/mp4"].find((t) => MediaRecorder.isTypeSupported(t));
-  const rec = new MediaRecorder(canvas.captureStream(fps), type ? { mimeType: type } : undefined);
-  const chunks = [];
-  rec.ondataavailable = (e) => chunks.push(e.data);
-  const done = new Promise((r) => { rec.onstop = r; });
-  ui.saveMovie.disabled = true; ui.saveMovie.textContent = "Recording…";
-  rec.start();
-  for (let k = 0; k < n * 3; k++) {
-    player.index = k % n; player.onFrame(k % n);
-    ctx.drawImage(composite(), 0, 0);
-    await new Promise((r) => setTimeout(r, 1000 / fps));
+  const original={view:state.view,index:player.index,playing:player.playing};
+  let recorder, stream, locked=[];
+  try {
+    const view=state.view==='colours' && state.cube?.channels ? 'colours' : 'blink';
+    if (state.view!==view) setView(view,{silent:true});
+    if (!player.count) throw new Error('No frames to record.');
+    if (player.playing) player.toggle();
+    state.recording=true;
+    locked=[...document.querySelectorAll('main button,main input,main select')].map(el=>[el,el.disabled]);
+    for (const [el] of locked) el.disabled=true;
+    ui.saveMovie.textContent='Recording…';
+    const canvas=composite(),ctx=canvas.getContext('2d'),fps=+ui.speed.value;
+    const type=['video/webm;codecs=vp9','video/webm','video/mp4'].find(t=>MediaRecorder.isTypeSupported(t));
+    if (!type) throw new Error('No supported movie format; save an image instead.');
+    stream=canvas.captureStream(fps); recorder=new MediaRecorder(stream,{mimeType:type});
+    const chunks=[];
+    recorder.ondataavailable=e=>{if(e.data.size) chunks.push(e.data);};
+    const done=new Promise((resolve,reject)=>{recorder.onstop=resolve;recorder.onerror=e=>reject(e.error || new Error('Recording failed'));});
+    recorder.start();
+    for(let k=0;k<player.count*3;k++) {
+      player.index=k%player.count; player.onFrame(player.index);ctx.drawImage(composite(),0,0);
+      await new Promise(resolve=>setTimeout(resolve,1000/fps));
+    }
+    recorder.stop();await done;
+    const url=URL.createObjectURL(new Blob(chunks,{type}));
+    const a=el('a',{href:url,download:`spherex-${state.preset||'field'}.${type.includes('mp4')?'mp4':'webm'}`});a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  } catch(e) { showBanner(`Movie export failed: ${e.message}`); }
+  finally {
+    if(recorder?.state==='recording') recorder.stop();
+    stream?.getTracks().forEach(t=>t.stop());state.recording=false;
+    for(const [el,disabled] of locked) el.disabled=disabled;
+    ui.saveMovie.textContent='Save movie';
+    setView(original.view,{silent:true});player.load(player.count,original.index);
+    if(player.playing!==original.playing) player.toggle();updatePlayerUI();render();
   }
-  rec.stop(); await done;
-  const ext = (type || "video/webm").includes("mp4") ? "mp4" : "webm";
-  const a = el("a", { href: URL.createObjectURL(new Blob(chunks, { type: type || "video/webm" })), download: `spherex-${state.preset || "field"}.${ext}` });
-  document.body.append(a); a.click(); a.remove();
-  ui.saveMovie.disabled = false; ui.saveMovie.textContent = "Save movie";
-  if (wasPlaying) { player.toggle(); updatePlayerUI(); }
 });
 
 /** Keep the sky map on the loaded target: draw its box, and move there if it is out of view. */
@@ -968,7 +990,7 @@ ui.showOnSky.addEventListener("click", () => {
   ensureSky().then(() => {
     if (!sky || !state.target) return;
     sky.goto(state.target.ra, state.target.dec, Math.max(0.6, fovValue() * 4));
-    sky.showFootprint(state.target.ra, state.target.dec, fovValue());
+    sky.select(state.target.ra, state.target.dec, fovValue());
   });
 });
 
@@ -997,17 +1019,22 @@ function showResult(parts) {
   }));
 }
 
+let nameAbort=null;
 async function searchName(name, { band } = {}) {
+  nameAbort?.abort(); const lookup=new AbortController(); nameAbort=lookup;
   name = name.trim();
   if (!name) return;
   const preset = presetByName(name);
   if (band) ui.band.value = band;
+  else if (preset) ui.band.value=preset.band;
   showResult([["", `Looking up “${name}”…`]]);
   const bannerBefore = { level: fallbackLevel, text: ui.banner.textContent, hidden: ui.banner.hidden };
   let r;
   try {
-    r = await api.resolve(name, { preset: preset?.slug });
+    r = await api.resolve(name, { preset: preset?.slug, signal:lookup.signal });
+    if(lookup.signal.aborted) return;
   } catch (e) {
+    if(lookup.signal.aborted || e.name === "AbortError") return;
     if (e.code === "not_found") {
       showResult([["", `No object called “${name}” was found. Check the spelling, or use Coordinates.`]]);
     } else if (preset) {
@@ -1104,6 +1131,7 @@ function sliceLabel(i) {
 }
 function ensureSky() {
   if (skyLoading) return skyLoading;
+  for (const c of [ui.skyDraw,ui.skyView,ui.skyBg,ui.skySlice]) c.disabled=true;
   ui.skyMsg.hidden = false;
   ui.skyMsg.textContent = "Loading the SPHEREx sky map…";
   const t = state.target || PRESETS[0];
@@ -1113,9 +1141,11 @@ function ensureSky() {
       target: `${t.ra} ${t.dec}`, fov: 2, presets: PRESETS,
       onSelect: onSkySelect,
       onCursor: (c) => { ui.skyCursor.textContent = c ? `${fmtDeg(c.ra, c.dec)}  (${fmtSexa(c.ra, c.dec)})` : "–"; },
-      onPreset: (slug) => choosePreset(PRESETS.find((p) => p.slug === slug)),
+      onPreset: (slug) => { const p=PRESETS.find(p=>p.slug===slug); if(p) sky?.select(p.ra,p.dec,fovValue()); },
       onView: ({ fov }) => { ui.skyView.textContent = `Use current view (${fov < 1 ? fov.toFixed(2) : fov.toFixed(1)}°)`; },
     });
+    for (const c of [ui.skyDraw,ui.skyView,ui.skyBg,ui.skySlice]) c.disabled=false;
+    ui.skyBg.closest('label').hidden=BACKGROUNDS.length<2;
     sky.setClickSide(fovValue());
     sky.onDrawArmed((on) => ui.skyDraw.setAttribute("aria-pressed", on));
     setSlice(sliceForBand(ui.band.value));
@@ -1131,7 +1161,9 @@ function ensureSky() {
     b.type = "button"; b.textContent = "Use coordinates instead";
     b.addEventListener("click", () => setMode("coords"));
     const box = document.createElement("div");
-    box.append(p, b);
+    const retry=document.createElement('button');retry.type='button';retry.textContent='Retry sky map';
+    retry.onclick=()=>{document.getElementById('sky').replaceChildren();ensureSky();};
+    box.append(p, b, retry);
     ui.skyMsg.append(box);
   });
   return skyLoading;
@@ -1159,7 +1191,8 @@ async function onSkySelect({ ra, dec, side, clamped }) {
   if (Math.abs(side - fovValue()) > 1e-4) setFov(side);
   ui.skySel.textContent = `${fmtDeg(ra, dec)} · ${side.toFixed(3)}° box${clamped ? " (clamped to the 0.5° limit)" : ""}`;
   ui.skyCompare.disabled = false;
-  checkCoverage(ra, dec, side);
+  if (nearestPreset(ra,dec)) checkCoverage(ra,dec,side);
+  else ui.skyCov.textContent='Checked when you compare. First searches can take 1–10 minutes; the rest of the site remains usable.';
 }
 
 /** Quick look at what SPHEREx has here before starting a (possibly slow) frames job. */
@@ -1190,6 +1223,9 @@ ui.skyCompare.addEventListener("click", () => {
   if (!s) return;
   const p = nearestPreset(s.ra, s.dec);
   loadTarget({ ra: s.ra, dec: s.dec, label: p ? p.label : `Sky region ${fmtSexa(s.ra, s.dec)}` });
+  ui.viewerNotice?.scrollIntoView?.({behavior:'smooth'});
+  document.getElementById('viewer').scrollIntoView({behavior:'smooth',block:'start'});
+  document.getElementById('viewer').focus({preventScroll:true});
 });
 
 // ---- shared control changes ----
@@ -1299,7 +1335,7 @@ if (hasCoords) {
   loadTarget({ ra: ra0, dec: dec0, name, label: name || p?.label || `RA ${sexa(ra0, true)}, Dec ${sexa(dec0, false)}` });
 } else if (qp.get("name")) {
   ui.name.value = qp.get("name");
-  searchName(qp.get("name"));
+  searchName(qp.get("name"), {band:qp.get("band") || undefined});
 } else if (startMode !== "explore") {
   choosePreset(PRESETS[0]);
 }

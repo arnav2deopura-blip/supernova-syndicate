@@ -393,3 +393,11 @@ body.embed footer { padding: 4px 8px; font-size: 0.75rem; }
 
 .backend-status { margin: 0 0 4px; }
 .backend-status.bad { color: var(--warn); }
+
+/* Keep research details separate from viewing and export actions. */
+.export-label { border-left: 1px solid #33415a; padding-left: 14px; margin-left: 4px; }
+button:disabled, select:disabled, input:disabled { cursor: not-allowed; opacity: .5; }
+.advanced .unknown { color: #a8b5c7; }
+.advanced section { overflow-x:auto; }
+#sky-selection { border:1px solid #415879; border-radius:8px; padding:12px; }
+#sky-compare:not(:disabled) { box-shadow:0 0 0 2px #6cb4ff38; }

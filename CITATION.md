@@ -35,3 +35,10 @@ Gaia Collaboration et al. (2023), *Gaia Data Release 3*, A&A 674, A1.
 
 - WiseView (ascl:1806.004), the blink tool used by Backyard Worlds.
 - `xcavation` and `SPIFF` SPHEREx photometry tools. **[TODO: check licences before reusing any code.]**
+
+## Interaction audit and optimization
+
+OpenAI Codex assisted with the 15 November 2026 browser audit, interaction fixes,
+metadata availability rules, playback caches, and repeatable acceptance tests.
+These changes introduce no new scientific data source or astronomical measurements.
+See `docs/ACCEPTANCE_AUDIT.md` for verification scope and limitations.

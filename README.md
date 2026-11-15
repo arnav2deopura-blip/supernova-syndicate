@@ -148,3 +148,12 @@ We used Anthropic's Claude to help plan the project and scaffold this repository
 Supernova Syndicate. _TODO: names and roles (A Data/Backend, B Science, C Frontend/Ship)._
 
 Licence: MIT.
+
+### Browser acceptance checks
+
+The final interaction audit and its limits are recorded in
+[docs/ACCEPTANCE_AUDIT.md](docs/ACCEPTANCE_AUDIT.md). With the frontend running on
+port 5600, optional Playwright tooling and Google Chrome installed, run
+`python tests/browser/acceptance.py` and `python tests/browser/measurements.py`.
+These exercise actual saved scientific products, live map selection, exports,
+channel controls and failure recovery; they do not replace a deployed-host smoke test.

@@ -57,7 +57,7 @@ export function tourSteps(h) {
     },
     {
       el: "#advanced", title: "For scientists",
-      text: ["The <b>Advanced</b> drawer has the per-pass and per-exposure metadata, the proper-motion fit, light curves, derived physics and FITS/CSV exports. Missing values say <i>Unknown</i> and why.",
+      text: ["The <b>Advanced</b> drawer has the per-pass and per-exposure metadata, the proper-motion fit, light curves, derived physics and FITS/CSV exports. Only available measurements are shown. Analyses needing more data are summarized below the results.",
         "Restart this tour any time with the <b>?</b> button. Happy hunting!"],
       before: async () => { h.openAdvanced(false); },
     },

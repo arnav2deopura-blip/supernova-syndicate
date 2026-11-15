@@ -5,11 +5,13 @@ import { renderFieldMetrics } from "./field-metrics.js";
 import { galactic, ecliptic, distance, tangentialVelocity, passMagnitudes, reducedPM, blackbodyT, falseAlarms } from "./astro.js";
 
 const f = (v, d = 2) => (v == null || !Number.isFinite(+v) ? null : (+v).toFixed(d));
-const unk = (why) => el("span", { class: "unknown", title: why, tabindex: "0", text: "Unknown" });
+const unk = (why) => el("span", { class: "unknown", title: why, tabindex: "0", text: "Not available" });
 /** A value, or Unknown with a reason. */
 const val = (v, why, unit = "") => (v == null ? unk(why) : `${v}${unit}`);
 
 function table(headers, rows) {
+  const visible=headers.map((_,i)=>i).filter(i=>rows.some(row=>row[i]!=null && !(row[i] instanceof Element && row[i].classList.contains('unknown'))));
+  rows=rows.map(row=>visible.map(i=>row[i])); headers=visible.map(i=>headers[i]);
   const t = el("table");
   t.append(el("thead", {}, el("tr", {}, ...headers.map((h) => el("th", { class: h.num ? "num" : "", text: h.label ?? h })))));
   const tb = el("tbody");
@@ -17,7 +19,7 @@ function table(headers, rows) {
   t.append(tb);
   return t;
 }
-const dl = (pairs) => el("dl", {}, ...pairs.flatMap(([k, v, formula]) => [el("dt", { text: k }), el("dd", {}, v, formula ? el("div", { class: "formula", text: formula }) : null)]));
+const dl = (pairs) => el("dl", {}, ...pairs.filter(([,v])=>!(v instanceof Element && v.classList.contains('unknown'))).flatMap(([k, v, formula]) => [el("dt", { text: k }), el("dd", {}, v, formula ? el("div", { class: "formula", text: formula }) : null)]));
 const section = (title, ...kids) => el("section", {}, el("h3", { text: title }), ...kids);
 const loadingOr = (state, why, build) => (state === "loading" ? el("p", { class: "hint", text: "Loading…" })
   : state?.error ? el("p", { class: "hint" }, unk(state.error), ` — ${state.error}`) : !state ? el("p", { class: "hint", text: why }) : build(state));
@@ -32,20 +34,20 @@ export function renderAdvanced(body, ctx) {
 
   // ---- passes ----
   out.push(section("Passes",
-    el("p", { class: "hint", text: `${band}${matched ? `, matched channels ${resp.matched_channels?.join(", ") || "?"} (λ_eff ${f(resp.lam_eff_um, 3) ?? "?"} µm)` : ""} · release ${resp.release || "unknown"} · ${resp.units || "MJy/sr"}` }),
+    el("p", { class: "hint", text: `${band}${matched ? `, matched channels ${resp.matched_channels?.join(", ") || "?"} (λ_eff ${f(resp.lam_eff_um, 3) ?? "?"} µm)` : ""} · release ${resp.release || "unknown"} · ${resp.units || "units not supplied"}` }),
     table(["Pass", "Dates", { label: "MJD mean", num: true }, { label: "Exp. used", num: true }, { label: "dropped", num: true }, { label: "λ_eff µm", num: true },
       { label: "noise ×", num: true }, { label: "reg. offset ″", num: true }, { label: "reg. rms ″", num: true }, { label: "flagged %", num: true }, "Target flags"],
     frames.map((fr) => [
       fr.epoch_label, `${mjdDate(fr.mjd_start)} – ${mjdDate(fr.mjd_end)}`,
       val(f(fr.mjd_mean, 2), "No mean MJD in this response"),
       String(fr.n_exposures ?? "?"),
-      val(fr.n_exposures_dropped ?? (matched ? null : "0"), "Only reported for matched frames"),
+      val(fr.n_exposures_dropped, "Only reported for matched frames"),
       val(f(fr.lam_eff_um, 3), "Not reported for this frame"),
       val(f(fr.noise_scale, 3), "Absent with a single frame or no noise map"),
       fr.astrometry ? `${f(fr.astrometry.dra_arcsec, 3)}, ${f(fr.astrometry.ddec_arcsec, 3)}` : unk("No Gaia registration (Gaia unreachable when built)"),
       val(f(fr.astrometry_rms_arcsec, 3), "No Gaia registration"),
       val(f(fr.flag_fraction != null ? fr.flag_fraction * 100 : null, 2), "Not reported"),
-      fr.target_flags?.length ? fr.target_flags.join(" ") : "none",
+      Array.isArray(fr.target_flags) ? (fr.target_flags.join(" ") || "none reported") : unk("Target flags were not supplied"),
     ]))));
 
   // ---- field summary and the clicked pixel (first vs last pass) ----
@@ -63,7 +65,7 @@ export function renderAdvanced(body, ctx) {
       const det = +band.slice(1);
       const mine = (ex.exposures || []).filter((e) => e.detector === det);
       return el("div", {},
-        el("p", { class: "hint", text: `${mine.length} ${band} exposures (${(ex.exposures || []).length} in all bands). Exposure time and PSF FWHM per exposure: Unknown — the backend does not expose these header fields yet.` }),
+        el("p", { class: "hint", text: `${mine.length} ${band} exposures (${(ex.exposures || []).length} in all bands). Times are MJD; wavelength and quality are shown only when measured by the pipeline.` }),
         table(["obs_id", { label: "MJD", num: true }, "Pass", { label: "λ at target µm", num: true }, { label: "flagged %", num: true }, "Target flags", "L2 file"],
           mine.slice(0, 200).map((e) => [e.obs_id, f(e.mjd, 3), e.epoch_label || "–",
             val(f(e.wavelength_um, 3), "Filled in once this detector's frames are built"),
@@ -142,6 +144,7 @@ export function renderAdvanced(body, ctx) {
 
   // ---- exports ----
   const exp = el("div", { class: "exports" });
+  exp.append(el('button',{type:'button',text:'Observation metadata CSV',onclick:()=>download('observations.csv',toCSV([['epoch','mjd_start','mjd_end','exposures','units','effective_wavelength_um','flags','observation_ids'],...frames.map(fr=>[fr.epoch_label,fr.mjd_start,fr.mjd_end,fr.n_exposures,resp.units||'',fr.lam_eff_um,fr.target_flags?.join(';'),fr.obs_ids?.join(';')])]),'text/csv')}));
   if (fitsURL) exp.append(el("a", { class: "btn", href: fitsURL, target: "_blank", rel: "noopener", text: "Frames as FITS" }));
   else exp.append(el("span", {}, "Frames as FITS: ", unk("Needs the live backend (the offline bake has no FITS export)")));
   if (spectrum?.points) {
@@ -159,5 +162,13 @@ export function renderAdvanced(body, ctx) {
   exp.append(copy);
   out.push(section("Exports", exp, el("pre", { text: cite })));
 
-  body.replaceChildren(...out);
+  const omitted=[];
+  for (const item of out) {
+    const lists=[...item.querySelectorAll('dl')];
+    if (lists.length && lists.every(d=>!d.children.length) && !item.querySelector('table,button,a')) {omitted.push(item.querySelector('h3')?.textContent); continue;}
+
+  }
+  const visible=out.filter(item=>!omitted.includes(item.querySelector('h3')?.textContent));
+  body.replaceChildren(...visible);
+  if (omitted.length) body.append(el('p',{class:'hint',text:`Not shown: ${omitted.join(', ')}. These analyses need additional validated measurements for the selected object.`}));
 }

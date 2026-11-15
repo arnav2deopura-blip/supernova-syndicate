@@ -7,9 +7,7 @@ const ALADIN_URL = "https://cdn.jsdelivr.net/npm/aladin-lite@3.8.2/dist/aladin.j
 export const SPHEREX_HIPS = "https://irsa.ipac.caltech.edu/data/hips/SPHEREx/spherex_allsky_cube";
 export const BACKGROUNDS = [
   { id: SPHEREX_HIPS, label: "SPHEREx DR1 (0.75–5 µm)", cube: true },
-  { id: "CDS/P/allWISE/color", label: "AllWISE colour (3.4–22 µm)" },
-  { id: "CDS/P/2MASS/color", label: "2MASS colour (1.2–2.2 µm)" },
-  { id: "CDS/P/DSS2/color", label: "DSS2 colour (optical)" },
+
 ];
 const N_SLICES = 102;
 // Dichroic channels D3C17 and D4C01 are blank. Frame 0 (D1C01) has no "_0" tile on the server, and Aladin
@@ -23,13 +21,17 @@ const MIN_SIDE = 0.01;
 export const sliceForBand = (band) => 17 * (Number(String(band).slice(1)) - 1) + 8;
 export const channelName = (i) => `D${Math.floor(i / 17) + 1}C${String((i % 17) + 1).padStart(2, "0")}`;
 
+const bounded = (promise, ms=20000) => new Promise((resolve,reject)=>{
+  const timer=setTimeout(()=>reject(new Error('The sky service timed out. Please retry.')),ms);
+  Promise.resolve(promise).then(v=>{clearTimeout(timer);resolve(v);},e=>{clearTimeout(timer);reject(e);});
+});
 let loading;
 function loadAladin() {
   // dist/aladin.js is an ES module whose default export is the `A` namespace
-  loading ??= import(ALADIN_URL)
+  loading ??= bounded(import(ALADIN_URL))
     .catch(() => { throw new Error("could not download Aladin Lite (offline?)"); })
     .then(async ({ default: A }) => {
-      try { await A.init; } catch (e) { throw new Error(String(e?.message || e)); }  // e.g. no WebGL2
+      try { await bounded(A.init); } catch (e) { throw new Error(String(e?.message || e)); }  // e.g. no WebGL2
       return A;
     });
   loading.catch(() => { loading = undefined; });  // allow a retry
@@ -39,7 +41,7 @@ function loadAladin() {
 /** Wavelength (µm) of each cube frame, from the HiPS properties file. */
 async function sliceWavelengths() {
   try {
-    const txt = await (await fetch(`${SPHEREX_HIPS}/properties`)).text();
+    const txt = await (await fetch(`${SPHEREX_HIPS}/properties`, {signal:AbortSignal.timeout(8000)})).text();
     const m = txt.match(/^data_cube_crval3_arr\s*=\s*(.+)$/m);
     const lam = m ? m[1].trim().split(/\s+/).map(Number) : [];
     return lam.length === N_SLICES ? lam : null;
@@ -70,11 +72,16 @@ export async function createSky(wrap, { target, fov = 2, presets = [], onSelect,
   const A = await loadAladin();
   const el = wrap.querySelector("#sky");
   const aladin = A.aladin(el, {
-    survey: SPHEREX_HIPS, target: target || "269.446 +4.771", fov, cooFrame: "ICRS", projection: "SIN",
+    survey: [], target: target || "269.446 +4.771", fov, cooFrame: "ICRS", projection: "SIN",
     showReticle: false, showCooGridControl: true, showLayersControl: false, showProjectionControl: false,
     showSimbadPointerControl: false, showFrame: false, showStatusBar: true, showContextMenu: false,
     showFullscreenControl: true, showZoomControl: true, showCooLocation: true, log: false,
   });
+
+  await bounded(new Promise((resolve,reject)=>{
+    const layer=A.imageHiPS(SPHEREX_HIPS,{successCallback:resolve,errorCallback:()=>reject(new Error('SPHEREx background imagery is unavailable'))});
+    aladin.setBaseImageLayer(layer);
+  }));
 
   // ---- presets: known interesting targets as a clickable catalogue
   const cat = A.catalog({ name: "Test targets", color: "#ffb547", sourceSize: 16, shape: "circle",
@@ -155,7 +162,7 @@ export async function createSky(wrap, { target, fov = 2, presets = [], onSelect,
       return wa && wb ? separationDeg(wa[0], wa[1], wb[0], wb[1]) : 0;
     };
     const side = Math.max(span({ x: s.x, y: mid.y }, { x: p.x, y: mid.y }), span({ x: mid.x, y: s.y }, { x: mid.x, y: p.y }));
-    select(c[0], c[1], side);
+    if (Number.isFinite(side) && side > 0) select(c[0], c[1], side);
   };
   wrap.addEventListener("pointerup", finish, true);
   wrap.addEventListener("pointercancel", () => { start = null; band.hidden = true; }, true);
@@ -176,13 +183,13 @@ export async function createSky(wrap, { target, fov = 2, presets = [], onSelect,
   // Aladin turns a slice number into a wavelength linearly across [em_min, em_max], then picks the tile frame
   // floor((f - f_min) / (f_max - f_min) * depth) linearly in frequency. SPHEREx channels are spaced neither way,
   // so invert that: aim at the middle of frame i in frequency and convert back to Aladin's slice number.
-  let wantedSlice = null, retry = null;
+  let wantedSlice = null, retry = null, attempts=0;
   function applySlice() {
     clearTimeout(retry);
     const layer = aladin.getBaseImageLayer();
     if (!background.cube || wantedSlice == null || !layer?.setSliceNumber) return;
     const { emMin, emMax, cubeDepth: n } = layer;
-    if (!layer.added || !emMin || !emMax || !n) { retry = setTimeout(applySlice, 250); return; }  // still loading
+    if (!layer.added || !emMin || !emMax || !n) { if (++attempts < 80) retry = setTimeout(applySlice, 250); return; }  // still loading
     const C = 299792458, fMin = C / emMax, fMax = C / emMin;
     const f = fMin + ((wantedSlice + 0.5) / n) * (fMax - fMin);
     layer.setSliceNumber(((C / f - emMin) / (emMax - emMin)) * n);
@@ -198,7 +205,7 @@ export async function createSky(wrap, { target, fov = 2, presets = [], onSelect,
     clearFootprint() { overlay.removeAll(); selection = null; },
     goto(ra, dec, viewFov) {
       aladin.gotoRaDec(ra, dec);
-      if (viewFov) aladin.setFoV(viewFov);
+      if (viewFov) aladin.setFov(viewFov);
     },
     /** The current view as a selection (centre + the visible width), clamped to the backend limit. */
     useCurrentView() {
@@ -216,7 +223,7 @@ export async function createSky(wrap, { target, fov = 2, presets = [], onSelect,
     },
     get isCube() { return !!background.cube; },
     setSlice(i) {
-      wantedSlice = i;
+      attempts=0; wantedSlice = i;
       applySlice();
     },
     isBlankSlice: (i) => BLANK_SLICES.has(i),
