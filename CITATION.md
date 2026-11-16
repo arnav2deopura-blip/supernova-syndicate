@@ -46,7 +46,7 @@ See `docs/ACCEPTANCE_AUDIT.md` for verification scope and limitations.
 
 ## Team and implementation assistance
 
-Sphere Shift: Chakshu Parnam, Arnav Deopura, and Zaid Khan.
+Sphere Shift: Chakshu Parnam, Arnav Deopura, and Mohammed Zaid Khan.
 Anthropic Claude assisted planning/scaffolding; OpenAI Codex assisted implementation,
 reliability fixes, test automation, and documentation. Generated code is not evidence of
 scientific validity; see the current release readiness report and recorded live checks.

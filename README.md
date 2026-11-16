@@ -145,7 +145,7 @@ Anthropic Claude helped plan the project and scaffold the repository. OpenAI Cod
 
 ## Team
 
-Sphere Shift: **Chakshu Parnam, Arnav Deopura, and Zaid Khan**.
+Sphere Shift: **Chakshu Parnam, Arnav Deopura, and Mohammed Zaid Khan**.
 
 Licence: MIT.
 
