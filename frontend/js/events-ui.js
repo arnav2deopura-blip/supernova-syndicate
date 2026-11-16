@@ -148,10 +148,12 @@ export function renderEventDetail(box, e, ctx) {
     const c = cutout(f, p.x, p.y, wcs, half);
     const cv = el("canvas", { width: c.n, height: c.n, "aria-hidden": "true" });
     draw(cv, c.data, c.n, c.n, { range: lim[1] > lim[0] ? lim : [lim[0], lim[0] + 1], stretch: "asinh" });
-    const st = { detected: "detected", faint: "faint", absent: "not seen", no_data: "no data", masked: "core masked", unknown: "?" }[p.state];
+    // a masked centre too wide for the S/N box, with valid pixels around it in the cutout, is still a saturated core
+    const state = p.state === "no_data" && c.data[half * c.n + half] === null && c.data.some((v) => v !== null) ? "masked" : p.state;
+    const st = { detected: "detected", faint: "faint", absent: "not seen", no_data: "no data", masked: "core masked", unknown: "?" }[state];
     strip.append(el("figure", { role: "listitem" }, cv,
       el("figcaption", {}, el("b", { text: p.epoch_label }), el("br"),
-        el("span", { class: `st-${p.state}`, text: `${p.snr == null || p.state === "masked" ? "" : `${fmt(p.snr)}σ `}${st}` }))));
+        el("span", { class: `st-${state}`, text: `${p.snr == null || state === "masked" ? "" : `${fmt(p.snr)}σ `}${st}` }))));
   }
   const flags = e.flags?.length ? el("ul", { class: "flags" }, ...e.flags.map((f) => el("li", { text: FLAG_INFO[f] || f }))) : null;
   const caveat = (e.kind === "appeared" || e.kind === "disappeared")

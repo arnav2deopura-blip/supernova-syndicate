@@ -362,6 +362,15 @@ function computeEvents() {
   renderEvents();
 }
 
+/** The target's light curve came back unusable (e.g. a saturated star): say why no variable event is listed. */
+function lightcurveCaveat() {
+  const lc = state.variability;
+  if (!lc || lc.reliable !== false || lc.variable === true) return "";
+  // our own words: the backend note guesses a cause (saturation) that is wrong for faint targets
+  const err = Number.isFinite(lc.median_frac_err) ? ` (typical error ${Math.round(lc.median_frac_err * 100)}%)` : "";
+  return ` No variability verdict for the target: its light curve is too noisy in ${ui.band.value}${err}.`;
+}
+
 function renderEvents() {
   const ev = state.events;
   const low = ev.filter((e) => e.confidence === "low").length;
@@ -374,7 +383,8 @@ function renderEvents() {
     const hi = ev.length - low;
     ui.eventsSummary.textContent = `${A.epoch_label} → ${B.epoch_label}: ${hi} confident event${hi === 1 ? "" : "s"}${low ? `, ${low} uncertain${ui.showLow.checked ? "" : " (hidden)"}` : ""}.`
       + (hasNoise() ? "" : state.wl.kind === "range" ? " Single channels have no noise maps, so no events are computed." : " No noise maps here, so only known movers are listed.")
-      + (!isMatched() && hasNoise() ? " Turn on matched wavelengths to trust brightness changes." : "");
+      + (!isMatched() && hasNoise() ? " Turn on matched wavelengths to trust brightness changes." : "")
+      + lightcurveCaveat();
   }
   renderEventList(ui.events, ev, { selected: state.selected, showLow: ui.showLow.checked, onSelect: (e) => selectEvent(e.id) });
   renderDetail();
@@ -908,7 +918,11 @@ async function measureSpectrum(ra, dec) {
   try {
     const s = await api.spectrum(q, {
       preset: state.preset, signal: ac.signal,
-      onProgress: (job) => spectrumMessage(ui.spectrum, `Measuring… ${job.total ? `${job.done} of ${job.total}` : jobTitle(job)}`),
+      onProgress: (job) => {
+        spectrumMessage(ui.spectrum, `Measuring… ${job.total ? `${job.done} of ${job.total}` : jobTitle(job)}`);
+        // only a live job reports progress: a spot nobody has measured yet is slow the first time
+        ui.spectrumNote.textContent = `At ${fmtSexa(ra, dec)}, ${det}. A new spot can take a few minutes the first time, then it is cached. A test target's own star is instant.`;
+      },
     });
     if (ac.signal.aborted) return;
     drawSpectrum(ui.spectrum, s.points);

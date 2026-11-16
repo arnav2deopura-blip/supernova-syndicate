@@ -95,6 +95,6 @@ not independently validate every fitted uncertainty or astrophysical interpretat
    exports intentionally describe these products as exploratory.
 
 No cloud deployment, Git commit, push, external message, or storage purchase was made
-by this repair task. Team: Chakshu Parnam, Arnav Deopura, and Zaid Khan.
+by this repair task. Team: Chakshu Parnam, Arnav Deopura, and Mohammed Zaid Khan.
 
 Final check receipt: `RELEASE_CHECKS.json`. File integrity inventory: `RELEASE_INVENTORY.json`. Desktop and phone screenshots: `img/frontend_final.png` and `img/frontend_mobile.png`.
