@@ -120,7 +120,7 @@ def bake_science(slug: str, t: dict, only: set | None = None) -> None:
 def localize_frames(body: dict, d: Path, slug: str, tag: str) -> None:
     """Download each frame's data (and noise) blob next to the JSON and point the URLs at the local files."""
     for f in body["frames"]:
-        for key, suffix in (("data", ""), ("noise", "_noise")):
+        for key, suffix in (("data", ""), ("noise", "_noise"), ("coverage", "_coverage")):
             if not f.get(key):
                 continue
             name = f"{f['epoch_label']}_{tag}{suffix}.bin"

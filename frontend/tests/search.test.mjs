@@ -214,12 +214,12 @@ test('a real not-found response does not fall back to unrelated saved observatio
   assert.ok(calls[0].startsWith(`${API_BASE}/api/frames?`));
 });
 
-test('an outage may use matching saved observations, while demo data is explicit', async (t) => {
+test('strict fresh refuses saved observations on an outage, while mock remains explicit', async (t) => {
   const calls = mockBrowser(t, (url) => url.startsWith(API_BASE)
     ? json({ error: 'upstream_unavailable', message: 'Archive is unavailable.' }, 503)
     : json(frames()), '?fresh=1');
-  assert.equal((await api.frames(matchedQuery(), { preset: 'barnards-star' }))._provenance.kind, 'precomputed');
-  assert.equal(calls.length, 2);
+  await assert.rejects(api.frames(matchedQuery(), { preset: 'barnards-star' }), apiFailure('upstream_unavailable'));
+  assert.equal(calls.length, 1);
   location.search = '?mock=1';
   const result = await api.frames(matchedQuery());
   assert.equal(calls.at(-1), 'mock/frames.json');
@@ -256,4 +256,42 @@ test('the saved target spectrum is never shown for a click elsewhere in the fiel
   const near = await api.spectrum({ ra: '269.448700', dec: '4.739400', det: 'D2' }, { preset: 'barnards-star' });
   assert.equal(near._provenance.kind, 'precomputed');
   await assert.rejects(api.spectrum({ ra: '269.460000', dec: '4.739400', det: 'D2' }, { preset: 'barnards-star' }), apiFailure('offline'));
+});
+
+
+test('malformed envelopes are rejected before dereferencing image metadata', async t => {
+  for (const payload of [{}, {wcs:frames().wcs}, {...frames(),frames:[null]}, {...frames(),wcs:{...frames().wcs,width:100000}}]) {
+    mockBrowser(t,()=>json(payload),'?fresh=1');
+    await assert.rejects(api.frames(query()),apiFailure('invalid_response'));
+  }
+});
+
+test('oversized binary arrays fail before decoding',async t=>{
+ const f=frames();f.frames[0].data='oversize.bin';
+ mockBrowser(t,url=>url==='oversize.bin'?new Response(new ArrayBuffer(20)):json(f),'?fresh=1');
+ await assert.rejects(api.frames(query()),apiFailure('invalid_response'));
+});
+
+test('a job with no progress reaches a retryable deadline',async t=>{
+ t.mock.timers.enable({apis:['setTimeout','Date'],now:0});
+ mockBrowser(t,()=>json({job_id:'job-1',state:'running',status_url:`${API_BASE}/api/jobs/job-1`},202),'?fresh=1');
+ await assert.rejects(api.frames(query(),{onProgress:()=>t.mock.timers.tick(300001)}),apiFailure('stalled'));
+});
+
+test('request deadlines work without AbortSignal.any or timeout',async t=>{
+ t.mock.timers.enable({apis:['setTimeout']});
+ const oldAny=AbortSignal.any,oldTimeout=AbortSignal.timeout;
+ AbortSignal.any=undefined;AbortSignal.timeout=undefined;
+ t.after(()=>{AbortSignal.any=oldAny;AbortSignal.timeout=oldTimeout;});
+ mockBrowser(t,(_,options)=>new Promise((resolve,reject)=>{
+  options.signal.addEventListener('abort',()=>reject(options.signal.reason));
+  queueMicrotask(()=>t.mock.timers.tick(45001));
+ }),'?fresh=1');
+ await assert.rejects(api.frames(query()),apiFailure('upstream_unavailable'));
+});
+
+test('a structurally valid image of the wrong sky field is rejected',async t=>{
+ const response=frames();response.ra=10;response.wcs.center_ra=10;
+ mockBrowser(t,()=>json(response),'?fresh=1');
+ await assert.rejects(api.frames(matchedQuery()),apiFailure('invalid_response'));
 });

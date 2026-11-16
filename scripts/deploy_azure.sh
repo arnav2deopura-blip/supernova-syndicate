@@ -2,7 +2,7 @@
 # Deploy the backend to Azure Container Apps (works on an Azure for Students subscription, no card).
 #
 #   az login --tenant <your-school-domain>       # once
-#   scripts/deploy_azure.sh                      # build, push, deploy (scales to zero when idle)
+#   scripts/deploy_azure.sh                      # build, push, deploy (one awake replica)
 #   MIN_REPLICAS=1 scripts/deploy_azure.sh       # keep one replica warm (judging day; uses more credit)
 #   TAG=v2 scripts/deploy_azure.sh               # redeploy new code under a new image tag
 #
@@ -26,7 +26,7 @@ LOCATION="${LOCATION:-canadacentral}"
 ENVNAME="${ENVNAME:-spherex-env}"
 APP="${APP:-spherex-api}"
 TAG="${TAG:-v1}"
-MIN_REPLICAS="${MIN_REPLICAS:-0}"
+MIN_REPLICAS="${MIN_REPLICAS:-1}"
 
 docker info >/dev/null 2>&1 || { echo "Docker is not running: start Docker Desktop first." >&2; exit 1; }
 SUB="$(az account show --query name -o tsv)"
@@ -57,7 +57,9 @@ docker buildx build --platform linux/amd64 -t "$IMAGE" --push .
 
 USER_="$(az acr credential show --name "$ACR" --query username -o tsv)"
 PASS_="$(az acr credential show --name "$ACR" --query 'passwords[0].value' -o tsv)"
-ENVV=("ALLOWED_ORIGINS=*" "SPHEREX_CACHE_DIR=/tmp/spherex-cache" "SPHEREX_CACHE_MAX_MB=1500")
+CACHE_DIR="/tmp/spherex-cache"
+[[ -z "${CACHE_STORAGE_NAME:-}" ]] || CACHE_DIR="/mnt/spherex-cache"
+ENVV=("ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-https://arnav2deopura-blip.github.io}" "SPHEREX_CACHE_DIR=$CACHE_DIR" "SPHEREX_CACHE_MAX_MB=${SPHEREX_CACHE_MAX_MB:-1500}")
 COMMON=(--resource-group "$RG" --image "$IMAGE" --cpu 1 --memory 2Gi
         --min-replicas "$MIN_REPLICAS" --max-replicas 1 --only-show-errors -o none)
 if az containerapp show --name "$APP" --resource-group "$RG" -o none 2>/dev/null; then
@@ -68,6 +70,25 @@ else
   az containerapp create --name "$APP" --environment "$ENVNAME" "${COMMON[@]}" --env-vars "${ENVV[@]}" \
     --ingress external --target-port 8000 \
     --registry-server "$SERVER" --registry-username "$USER_" --registry-password "$PASS_"
+fi
+
+# Optional pre-provisioned Azure Files environment storage. No account keys are written here.
+if [[ -n "${CACHE_STORAGE_NAME:-}" ]]; then
+  config_file="$(mktemp -t spherex-volume.XXXXXX)"
+  trap 'rm -f "$config_file"' EXIT
+  az containerapp show --name "$APP" --resource-group "$RG" -o json > "$config_file"
+  python3 - "$config_file" "$CACHE_STORAGE_NAME" <<'PYV'
+import json,sys
+path,name=sys.argv[1:];app=json.load(open(path));props=app['properties'];template=props['template']
+volumes=[v for v in template.get('volumes',[]) if v['name']!='spherex-cache']
+volumes.append({'name':'spherex-cache','storageType':'AzureFile','storageName':name});template['volumes']=volumes
+for container in template['containers']:
+ mounts=[v for v in container.get('volumeMounts',[]) if v['volumeName']!='spherex-cache']
+ mounts.append({'volumeName':'spherex-cache','mountPath':'/mnt/spherex-cache'});container['volumeMounts']=mounts
+import yaml
+with open(path,'w') as f:yaml.safe_dump({'properties':{'configuration':props['configuration'],'template':template}},f)
+PYV
+  az containerapp update --name "$APP" --resource-group "$RG" --yaml "$config_file" --only-show-errors -o none
 fi
 
 URL="https://$(az containerapp show --name "$APP" --resource-group "$RG" --query properties.configuration.ingress.fqdn -o tsv)"

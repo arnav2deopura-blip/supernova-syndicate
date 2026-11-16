@@ -1,8 +1,8 @@
-# SPHEREx Sky Explorer
+# Sphere Shift
 
 **A blink comparator for a 102-colour sky.** Type coordinates, watch the infrared sky change between SPHEREx passes, and spot stars that move or flicker.
 
-Built by **Supernova Syndicate** for the 2026 NASA Space Apps Challenge (SPHEREx / Planet X challenge).
+Built by **Sphere Shift** for the 2026 NASA Space Apps Challenge (SPHEREx / Planet X challenge).
 
 > Status: under construction during the hackathon (14–15 Nov 2026).
 
@@ -28,7 +28,7 @@ The first screen is a picker with the five test targets as example cards. The se
 
 | Mode | How | Backend |
 |---|---|---|
-| **Explore the sky** | Pan and zoom the SPHEREx DR1 all-sky map ([IRSA HiPS cube](https://irsa.ipac.caltech.edu/data/hips/SPHEREx/spherex_allsky_cube), via Aladin Lite), with a slider over all 102 channels. Click to drop a box of the chosen FOV, or Shift+drag (or "Draw box" on touch) to draw one, up to 0.5°. A coverage check shows the exposures and passes before you compare | `/api/exposures`, then `/api/frames` |
+| **Explore the sky** | Pan and zoom the SPHEREx DR1 all-sky map ([IRSA HiPS cube](https://irsa.ipac.caltech.edu/data/hips/SPHEREx/spherex_allsky_cube), via Aladin Lite), with a slider over the available HiPS spectral slices. Click to drop a box of the chosen FOV, or Shift+drag (or "Draw box" on touch) to draw one, up to 0.5°. A coverage check shows the exposures and passes before you compare | `/api/exposures`, then `/api/frames` |
 | **Object name** | Type a name (recent searches and the test targets are suggested). It resolves through SIMBAD and is propagated to now; the proper motion is used for the spectrum | `/api/resolve`, then `/api/frames` |
 | **Coordinates** | RA/Dec in decimal degrees or sexagesimal (`17:57:47 +04:46:14`), or both pasted into one box | `/api/frames` |
 
@@ -49,7 +49,7 @@ A single SPHEREx exposure isn't one colour: each detector sits behind a linear v
 - [x] Three search modes: explore the sky map, object name, RA/Dec
 - [x] Progress and cancel for slow first requests (async jobs)
 - [x] Instrument layout: the image takes every spare pixel; a wavelength ruler (D1–D6, 17 channels each) and a time ruler (each pass a block on a real date axis, exposures as ticks) carry the other two axes; corner readouts, scale bar, compass, colour bar with units, cursor position and pixel value
-- [x] Play passes (blink) per detector band, play/pause/step, speed up to 3 frames per second (faster only after a photosensitivity warning), optional 150 ms "Smooth" crossfade (off by default: a hard cut makes a mover jump)
+- [x] Play passes (blink) per detector band, play/pause/step, speed up to 3 frames per second (faster only after a photosensitivity warning); Smooth (a labelled crossfade) and Side by side views
 - [x] Difference and **Changes (σ)** between any two passes, from the calibrated noise maps; Sum
 - [x] **"What changed?" markers**: regions ≥ 5σ circled automatically (○ brighter/new, ✕ fainter/gone, → moved, ◐ variable; dashed = uncertain), merged with Gaia known movers, the `/api/movers` search and the `/api/lightcurve` verdict, listed as Events
 - [x] Per-event card: each pass at that spot with S/N, one-click "Is it new?" checks (SIMBAD, CatWISE, Gaia, IRSA Finder Chart, SkyBoT), JSON/CSV report
@@ -57,7 +57,7 @@ A single SPHEREx exposure isn't one colour: each detector sits behind a linear v
 - [x] 102 bands browsable: whole detector band, a channel range inside one detector, molecule presets (water ice, PAH/CH₄, CO₂ ice, CO), and a Colours view that plays through a band's 17 channels
 - [x] Inspector with Events, Spectrum and Details tabs. Details: per-pass and per-exposure metadata ("No-data pixels %" is the share of pixels without data), SPHEREx-only proper motion, photometry stated in one band, derived physics (Unknown + reason when an input is missing; no colour temperature until its uncertainty is validated), exports, citation
 - [x] Gaia DR3 overlay with proper-motion tracks; click for a spectrum (drawn at screen resolution, axes in µm and µJy, error bars, a shape per pass, flagged points hollow)
-- [x] States stated: a provenance tag (Saved demo data / Server cache / Processed now / Mock), a comparison tag ("Matched at centre" or "Not matched"), a warning strip for saturated cores and incomplete data, the source of the target position in words, and hatching for pixels with no data
+- [x] States stated: a provenance tag (Saved demo data / Server cache / Processed now / Mock, from the backend's `retrieval` and `completeness` fields), a comparison tag ("Matched at centre" or "Not matched"), a warning strip for saturated cores and incomplete data, the source of the target position in words, and hatching for pixels with no data
 - [x] Every channel of a requested range must be covered in every pass, or nothing is drawn and the user chooses; channel-range frames carry their own dates, exposure counts and observation IDs
 - [x] Robust client: every response is checked before use, slow jobs poll less often, a job with no progress for 2 minutes asks to keep waiting, retry or cancel, a job the server forgot is sent again once, a busy server is retried after its delay
 - [x] Exports carry a reproducibility header (URL, release, provenance, wavelengths, masking, warnings)
@@ -67,8 +67,8 @@ A single SPHEREx exposure isn't one colour: each detector sits behind a linear v
 
 **Restored or deferred (decided 15 Nov 2026):**
 
-- Crossfade between passes: **restored** as the "Smooth" option, off by default, unavailable under reduced motion.
-- Side by side with linked zoom, pan and crosshair: **deferred**. Use Play passes or Difference.
+- Crossfade between passes: **restored** as the Smooth view (a labelled visual blend; Play passes keeps the hard cut). Plain passes under reduced motion.
+- Side by side: **restored** with shared placement, stretch and zoom for passes A and B. A linked cursor crosshair is deferred.
 - Details split into Measure / Data / Export, a dark-centre diverging map for Changes (σ), and a light theme: **deferred**.
 - CatWISE overlay: **deferred**; the per-event checks link to CatWISE in VizieR.
 
@@ -129,8 +129,8 @@ python -m http.server 5500 --directory frontend       # second terminal; open ht
 | `?api=local` | A backend on this machine, port 8000 (remembered in this browser) |
 | `?api=https://…` | Any other backend (remembered) |
 | `?api=default` | Back to the deployed backend |
-| `?fresh=1` | Ask the backend even for the five test targets (normally they load from `frontend/precomputed/`, the same pipeline and release, so a demo never waits on a rebuild); an outage may still fall back to saved data |
-| `?verify=1` | Prove the live path: saved data is never read and never used as a fallback; an outage is an error. Resolved name positions are used as returned |
+| `?fresh=1` | "Backend only" (also a checkbox in the status bar): saved data is never read or used as a fallback, and an outage is an error. Resolved name positions are used as returned. It does not purge backend caches |
+| `?verify=1` | Same as `?fresh=1` (kept for older links) |
 | `?mock=1` | Fake data from `frontend/mock/`, no backend (layout work only) |
 
 A position nobody has asked for yet takes ~1–10 min to build the first time (the page shows progress), then it is cached. The deployed backend scales to zero when idle and loses its cache, so the first request after a quiet spell is slower.
@@ -141,7 +141,7 @@ New SPHEREx release? A weekly GitHub Action opens an issue when one appears; the
 
 ## Validation
 
-See [docs/VALIDATION.md](docs/VALIDATION.md) for results on all five test targets.
+Current verification and limits: [docs/RELEASE_READINESS.md](docs/RELEASE_READINESS.md). Real cold-cache builds: [docs/LIVE_VALIDATION.json](docs/LIVE_VALIDATION.json). Earlier measurement studies are archived in [docs/VALIDATION.md](docs/VALIDATION.md); their numbers are not current release certification.
 
 ## Limits
 
@@ -157,10 +157,43 @@ Interface: icons from [Lucide](https://lucide.dev) (ISC licence); IBM Plex Sans 
 
 ## AI use disclosure
 
-We used Anthropic's Claude to help plan the project and scaffold this repository, and Claude Code to implement the frontend upgrade (layout, design tokens, robustness and labelling fixes, tests) from our written plan. No AI-generated images and no NASA branding are used. _TODO: list every other AI tool used and how, before submission._
+Anthropic Claude helped plan the project and scaffold the repository, and Claude Code implemented the frontend redesign (layout, design tokens, wavelength and time rulers, honesty labels, client robustness, tests) from our written plan. OpenAI Codex assisted with frontend implementation, backend reliability fixes, scientific guardrails, documentation, and automated/manual browser audits. AI-generated changes are checked by the repository suites; this does not independently validate every scientific inference. No AI-generated images and no NASA branding are used.
 
 ## Team
 
-Supernova Syndicate. _TODO: names and roles (A Data/Backend, B Science, C Frontend/Ship)._
+Sphere Shift: **Chakshu Parnam, Arnav Deopura, and Mohammed Zaid Khan**.
 
 Licence: MIT.
+
+### Browser acceptance checks
+
+The final interaction audit and its limits are recorded in
+[docs/ACCEPTANCE_AUDIT.md](docs/ACCEPTANCE_AUDIT.md). With the frontend running on
+port 5600, optional Playwright tooling and Google Chrome installed, run
+`python tests/browser/acceptance.py` and `python tests/browser/measurements.py`.
+These exercise actual saved scientific products, live map selection, exports,
+channel controls and failure recovery; they do not replace a deployed-host smoke test.
+
+
+### Comparison and research behavior
+
+Play passes shows actual dated images. Smooth blends adjacent images for presentation only.
+Side by side uses the same WCS, brightness stretch and zoom for two selected passes.
+Matched wavelengths apply at the field centre: off-centre brightness residuals remain exploratory.
+The Details tab loads optional analyses once per target and exports a research manifest (it also carries the reproducibility header). For the saved test targets the movers search and light curve load at once; for any other position they run when Details is opened.
+“No-data pixels %” describes missing output pixels, separately from contamination flags at the target.
+Invalid parallax/errors, mixed-channel magnitudes and unvalidated colour temperatures are withheld.
+
+Test targets normally load explicitly labeled saved observations for speed. Add `?fresh=1` to
+require the backend and disable saved fallback. The badge distinguishes a backend cache hit from
+a new archive build. An empty-cache run of `scripts/validate_live.py` tests retrieval independently
+of the saved files. Public archive availability and sampling limits are reported, not hidden.
+
+Python 3.12+ is required for the backend. `scripts/run_local.sh --backend` installs the pinned
+requirements even into an existing venv, loads `.env`, and checks server readiness. Install
+`scripts/requirements-figures.txt` only for optional plotting scripts.
+
+Dense fields can exceed the per-job image budget even below the maximum FOV. The
+service checks this before downloading cutouts and offers a smaller field; it does
+not attempt an unbounded allocation. Research fits combining detectors have the same
+working-set limit.

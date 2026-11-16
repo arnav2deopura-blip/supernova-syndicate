@@ -1,16 +1,19 @@
-fastapi>=0.110
-uvicorn[standard]>=0.29
-pydantic>=2.6
-pyyaml>=6.0
-numpy>=1.26
-astropy>=6.0
-astroquery>=0.4.7
-pyvo>=1.5
-reproject>=0.13
-photutils>=1.11
-requests>=2.31
-httpx>=0.27
-scipy>=1.12
-fsspec>=2024.2
-aiohttp>=3.9
-pytest>=8.0
+# Python 3.12 or newer. Versions verified by the repository test suites.
+-c constraints.txt
+fastapi==0.163.1
+uvicorn[standard]==0.54.0
+pydantic==2.14.3
+pyyaml==6.0.3
+numpy==2.5.4
+astropy==8.0.2
+astroquery==0.4.11
+pyvo==1.10.0
+reproject==0.21.0
+photutils==3.1.1
+requests==2.34.2
+httpx==0.28.1
+scipy==1.18.1
+fsspec==2026.9.0
+aiohttp==3.14.5
+pytest==9.2.0
+python-dotenv==1.2.4

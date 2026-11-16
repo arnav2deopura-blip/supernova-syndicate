@@ -57,7 +57,7 @@ export function tourSteps(h) {
     },
     {
       el: "#advanced", title: "For scientists",
-      text: ["The <b>Details</b> tab has the per-pass and per-exposure metadata, the proper-motion fit, light curves, derived physics and FITS/CSV exports with a reproducibility header. Missing values say <i>Unknown</i> and why.",
+      text: ["The <b>Details</b> tab has the per-pass and per-exposure metadata, the proper-motion fit, light curves, derived physics, a research manifest and FITS/CSV exports with a reproducibility header. Only available measurements are shown; analyses that need more data are listed below the results.",
         "The tag next to the ruler says where the data came from. Restart this tour any time from <b>Tour</b> or <b>?</b>. Happy hunting!"],
       before: async () => { h.collapseSearch(); h.openAdvanced(true); },
     },

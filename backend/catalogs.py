@@ -34,11 +34,14 @@ def propagate(ra: float, dec: float, pmra: float, pmdec: float, from_year: float
     Good to well under a pixel over decades for everything we target; ignores
     parallax and radial velocity.
     """
-    dt = to_year - from_year
-    ddec = pmdec * dt / MAS_PER_DEG
-    cosd = math.cos(math.radians(dec))
-    dra = (pmra * dt / MAS_PER_DEG) / cosd if cosd > 1e-9 else 0.0
-    return (ra + dra) % 360.0, max(-90.0, min(90.0, dec + ddec))
+    # Advance the unit direction along its tangent vector, then normalize. This
+    # remains well behaved at RA wrap and the poles, with no distance/RV assumption.
+    a,d=math.radians(ra),math.radians(dec)
+    dt=(to_year-from_year)*math.pi/180/MAS_PER_DEG
+    x=math.cos(d)*math.cos(a)+dt*(-pmra*math.sin(a)-pmdec*math.sin(d)*math.cos(a))
+    y=math.cos(d)*math.sin(a)+dt*(pmra*math.cos(a)-pmdec*math.sin(d)*math.sin(a))
+    z=math.sin(d)+dt*pmdec*math.cos(d)
+    return math.degrees(math.atan2(y,x))%360, math.degrees(math.atan2(z,math.hypot(x,y)))
 
 
 def mjd_to_year(mjd: float) -> float:
@@ -86,12 +89,13 @@ def resolve_name(name: str, to_year: float | None = None) -> dict:
     ra, dec = hit["ra"], hit["dec"]
     if hit["pmra"] is not None and hit["pmdec"] is not None:
         ra, dec = propagate(ra, dec, hit["pmra"], hit["pmdec"], 2000.0, year)
-    return {"name": hit["name"] or name, "ra": round(ra, 7), "dec": round(dec, 7), "epoch": round(year, 3),
+    return {"name": hit["name"] or name, "ra": round(ra, 7), "dec": round(dec, 7), "epoch": round(year if hit["pmra"] is not None and hit["pmdec"] is not None else 2000.0, 3),
+            "propagated": hit["pmra"] is not None and hit["pmdec"] is not None,
             "pmra": hit["pmra"], "pmdec": hit["pmdec"], "source": hit["source"]}
 
 
 def gaia_query(ra: float, dec: float, radius_deg: float, gmax: float = 18.0, pm_min: float = 100.0,
-               limit: int = 1000) -> list[dict]:
+               limit: int = 1000, timeout: float = 30) -> list[dict]:
     """Gaia DR3 cone (ESA archive), J2016.0 positions. Bright-ish stars plus every fast mover at any
     magnitude: the movers are the point of the overlay. Cached forever (DR3 is static)."""
     from . import cache  # local import: cache imports config, keep catalogs importable standalone
@@ -106,10 +110,12 @@ def gaia_query(ra: float, dec: float, radius_deg: float, gmax: float = 18.0, pm_
          "ORDER BY phot_g_mean_mag")
     try:
         r = requests.get(GAIA_TAP, params={"REQUEST": "doQuery", "LANG": "ADQL", "FORMAT": "csv", "QUERY": q},
-                         timeout=30)
+                         timeout=timeout)
     except requests.RequestException as e:
         raise ResolverUnavailable(f"Gaia archive unreachable: {e}") from e
-    if r.status_code != 200 or not r.text.startswith("source_id"):
+    reader=csv.DictReader(io.StringIO(r.text.lstrip('\ufeff')))
+    if reader.fieldnames:reader.fieldnames=[key.strip().lower().split('.')[-1] for key in reader.fieldnames]
+    if r.status_code != 200 or not {'source_id','ra','dec','pmra','pmdec'}.issubset(reader.fieldnames or []):
         raise ResolverUnavailable(f"Gaia archive returned HTTP {r.status_code}")
 
     def num(v):
@@ -117,7 +123,7 @@ def gaia_query(ra: float, dec: float, radius_deg: float, gmax: float = 18.0, pm_
 
     rows = [{"id": f"Gaia DR3 {x['source_id']}", "ra": float(x["ra"]), "dec": float(x["dec"]),
              "pmra": num(x["pmra"]), "pmdec": num(x["pmdec"]), "parallax": num(x["parallax"]),
-             "mag": num(x["phot_g_mean_mag"])} for x in csv.DictReader(io.StringIO(r.text))]
+             "mag": num(x["phot_g_mean_mag"])} for x in reader]
     cache.put_json(ck, rows)
     return rows
 
@@ -126,12 +132,13 @@ def gaia_sources(ra: float, dec: float, fov: float, epochs: list[tuple[str, floa
     """Gaia DR3 sources in a fov-square field, each propagated to every epoch's mean MJD.
 
     `ra`/`dec` stay the catalogue J2016.0 values (ref_epoch); use positions_by_epoch to draw.
-    Linear proper motion only: parallax (<0.6" even for Barnard's Star) is ignored.
+    Tangential proper motion only: parallax (<0.6" even for Barnard's Star) is ignored.
     Not in Gaia: very red, faint objects such as WISE 0855 (use CatWISE, tier 3).
     """
     half_diag = fov / math.sqrt(2) * 1.05
     out = []
-    for s in gaia_query(ra, dec, half_diag):
+    margin = max((abs(mjd_to_year(t)-GAIA_EPOCH)*12/3600 for _,t in epochs), default=0)
+    for s in gaia_query(ra, dec, half_diag+margin):
         pos = []
         for label, mjd in epochs:
             if s["pmra"] is not None and s["pmdec"] is not None:
@@ -139,6 +146,8 @@ def gaia_sources(ra: float, dec: float, fov: float, epochs: list[tuple[str, floa
             else:
                 pra, pdec = s["ra"], s["dec"]
             pos.append({"epoch_label": label, "mjd": round(mjd, 4), "ra": round(pra, 7), "dec": round(pdec, 7)})
+        if pos and not any(math.degrees(math.acos(max(-1,min(1,math.sin(math.radians(p['dec']))*math.sin(math.radians(dec))+math.cos(math.radians(p['dec']))*math.cos(math.radians(dec))*math.cos(math.radians(p['ra']-ra)))))) <= half_diag for p in pos):
+            continue
         out.append({"id": s["id"], "ra": s["ra"], "dec": s["dec"], "pmra": s["pmra"], "pmdec": s["pmdec"],
                     "mag": s["mag"], "ref_epoch": GAIA_EPOCH, "positions_by_epoch": pos})
     return out

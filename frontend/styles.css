@@ -199,6 +199,7 @@ button.info:hover, button.info[aria-expanded="true"] { color: var(--ink-1); back
 .brand { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-1); text-decoration: none; flex: none; }
 .brand h1 { font-size: 14px; line-height: 20px; font-weight: 600; white-space: nowrap; }
 .brand .glyph { color: var(--ink-1); }
+.brand-sub { font: 11px/16px var(--mono); color: var(--ink-3); white-space: nowrap; }
 .top-search { position: relative; flex: 1 1 360px; max-width: 560px; }
 .top-search .field { display: flex; align-items: center; gap: 8px; background: var(--bg-2); border: 1px solid var(--line-3); border-radius: var(--r-ctl); padding: 0 8px; color: var(--ink-3); }
 .top-search .field:focus-within { outline: 2px solid var(--ink-1); outline-offset: 2px; }
@@ -272,7 +273,11 @@ button.info:hover, button.info[aria-expanded="true"] { color: var(--ink-1); back
 .viewer:focus { outline: none; }
 .viewbar { display: flex; align-items: center; gap: 8px; padding: 6px 16px; border-bottom: 1px solid var(--line-1); min-height: 40px; flex-wrap: wrap; }
 .views { flex-wrap: nowrap; }
-.views button[role="radio"] { padding: 3px 12px; }
+.zoom-ctl { flex-direction: row; align-items: center; gap: 6px; }
+.zoom-ctl .zoom-word { color: var(--ink-2); }
+.views button[role="radio"] { padding: 3px 9px; }
+.viewbar > button, .viewbar summary.btn { padding: 3px 8px; }
+@media (max-width: 1439px) and (min-width: 800px) { .zoom-ctl > :first-child { display: none; } .viewbar { gap: 6px; } }
 .display-opts > summary { list-style: none; }
 .display-opts[open] > summary { background: var(--bg-3); border-color: var(--ink-2); }
 .display-opts .pop { grid-template-columns: 1fr 1fr; }
@@ -334,6 +339,13 @@ button.info:hover, button.info[aria-expanded="true"] { color: var(--ink-1); back
 .corner.bl b { font-weight: 500; }
 .stage-empty { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 24px; color: var(--ink-3); background: var(--bg-0); z-index: 4; }
 
+/* Side by side: two panes with shared placement, stretch and zoom */
+.pair-stage { display: flex; gap: 8px; flex: none; }
+.pair-pane { position: relative; width: 240px; height: 240px; overflow: hidden; background: var(--stage); border: 1px solid var(--line-1); }
+.pair-inner { position: absolute; inset: 0; transform-origin: 50% 50%; transition: transform 0.25s ease;
+  background: repeating-linear-gradient(45deg, var(--nodata) 0 3px, var(--nodata-hatch) 3px 4px); }
+.pair-pane canvas { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; cursor: crosshair; }
+.pair-pane canvas[aria-hidden] { pointer-events: none; }
 .cbar { display: grid; grid-template-rows: auto 1fr auto auto; justify-items: start; gap: 4px; width: 56px; font: 11px/16px var(--mono); color: var(--ink-2); }
 .cbar-ramp { display: block; width: 12px; border: 1px solid var(--line-2); }
 .cbar-u { color: var(--ink-3); }
@@ -496,6 +508,9 @@ th { color: var(--ink-3); font-weight: 500; }
 .adv-body dt { color: var(--ink-3); }
 .adv-body dd { margin: 0; font-variant-numeric: tabular-nums; }
 .unknown { color: var(--ink-3); border-bottom: 1px dotted var(--ink-3); cursor: help; }
+.research-note { padding: 8px 12px; border-left: 2px solid var(--ink-2); background: var(--bg-2); color: var(--ink-2); font-size: 12px; line-height: 16px; }
+.sky-msg-actions { display: grid; gap: 8px; justify-items: center; }
+.sky-msg-actions p { max-width: 44ch; }
 .formula { color: var(--ink-3); font-size: 11px; line-height: 16px; }
 .adv-body .exports { display: flex; flex-wrap: wrap; gap: 6px; }
 .adv-body pre { white-space: pre-wrap; font: 11px/16px var(--mono); background: var(--bg-0); border: 1px solid var(--line-1); padding: 8px; max-height: 160px; overflow: auto; }
@@ -516,6 +531,7 @@ th { color: var(--ink-3); font-weight: 500; }
 .backend-status.bad::before { background: transparent; border-color: var(--warn); }
 .statusbar .sources { overflow: hidden; text-overflow: ellipsis; }
 .statusbar button.link { font-size: 12px; color: var(--ink-2); }
+.statusbar label.check { font-size: 12px; color: var(--ink-2); gap: 6px; }
 
 /* ---------------------------------------------------------------- dialogs, tour */
 dialog.guide { background: var(--bg-1); color: var(--ink-1); border: 1px solid var(--line-2); border-radius: var(--r-pop); width: min(920px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 16px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); }
@@ -573,6 +589,7 @@ dialog ul { color: var(--ink-2); padding-left: 18px; }
   .topbar { flex-wrap: wrap; padding: 6px 16px; gap: 8px; }
   .brand { flex: 1 1 auto; min-width: 0; }
   .brand h1 { font-size: 15px; overflow: hidden; text-overflow: ellipsis; }
+  .brand-sub { display: none; }
   .top-search { order: 3; flex: 1 1 100%; max-width: none; }
   .top-actions { margin-left: 0; }
   #guide-btn, #tour-btn, #show-on-sky { display: none; }

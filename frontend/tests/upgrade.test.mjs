@@ -170,12 +170,13 @@ test('every requested channel is required: a gap is reported, never silently dro
     ch(10, [['E1', 60001, 1, ['d']], ['E2', 60202, 1, ['e']]]),
   ] };
   const r = framesFromCube(cube, 8, 10);
-  assert.deepEqual(r.missing.map((m) => [m.k, m.passes]), [[9, ['E1']]]);
+  assert.deepEqual(r.gaps.map((m) => [m.k, m.passes]), [[9, ['E1']]]);
+  assert.deepEqual(r.missing, ['D6C09']);
   assert.deepEqual(r.frames.map((f) => f.epoch_label), ['E2']);
   assert.deepEqual(coveredRuns(cube, 8, 10), [{ lo: 8, hi: 8 }, { lo: 10, hi: 10 }]);
   // a channel with no data at all in the range is missing from every pass
   const r2 = framesFromCube({ ...cube, channels: cube.channels.filter((c) => c.channel !== 'D6C09') }, 8, 10);
-  assert.deepEqual(r2.missing.map((m) => m.k), [9]);
+  assert.deepEqual(r2.missing, ['D6C09']);
   assert.equal(r2.frames.length, 0);
 });
 
@@ -205,20 +206,23 @@ test('distance needs a finite, positive parallax and error', () => {
   assert.ok(tangentialVelocity(NaN, { value: 1 }).unknown);
 });
 
-test('magnitudes need positive flux and error, and stay within one named band', () => {
+test('magnitudes need positive flux and error, and one spectral channel shared by every pass', () => {
   assert.equal(abMag(-1), null);
   assert.equal(abMag(NaN), null);
   const pts = [
-    { wavelength_um: 1.2, flux: 1000, flux_err: 10, epoch_label: 'E1', flagged: false },
-    { wavelength_um: 1.3, flux: 1000, flux_err: 0, epoch_label: 'E1', flagged: false },
-    { wavelength_um: 4.6, flux: 9, flux_err: 1, epoch_label: 'E2', flagged: false },
-    { wavelength_um: 1.25, flux: 500, flux_err: 10, epoch_label: 'E2', flagged: false },
+    { wavelength_um: 1.2, flux: 1000, flux_err: 10, epoch_label: 'E1', flagged: false, channel: 'D2C05' },
+    { wavelength_um: 1.3, flux: 1000, flux_err: 0, epoch_label: 'E1', flagged: false, channel: 'D2C08' },
+    { wavelength_um: 4.6, flux: 9, flux_err: 1, epoch_label: 'E2', flagged: false, channel: 'D6C10' },
+    { wavelength_um: 1.21, flux: 500, flux_err: 10, epoch_label: 'E2', flagged: false, channel: 'D2C05' },
   ];
-  const d2 = passMagnitudes(pts, { name: 'D2', lo: 1.1, hi: 1.65 });
-  assert.equal(d2.band, 'D2');
-  assert.deepEqual(d2.per.map((p) => p.epoch_label), ['E1', 'E2']);
-  assert.ok(Math.abs(d2.dm - 2.5 * Math.log10(2)) < 1e-9);
-  assert.ok(passMagnitudes(pts, { name: 'D1', lo: 0.75, hi: 1.09 }).unknown);
+  const m = passMagnitudes(pts);
+  assert.equal(m.channel, 'D2C05');
+  assert.deepEqual(m.per.map((p) => p.epoch_label), ['E1', 'E2']);
+  assert.ok(Math.abs(m.dm - 2.5 * Math.log10(2)) < 1e-9);
+  const one = passMagnitudes(pts.filter((p) => p.channel !== 'D2C05'));   // only E2 has a usable point left
+  assert.equal(one.per.length, 1);
+  assert.equal(one.dm, null, 'no Δm from a single pass');
+  assert.ok(passMagnitudes([{ ...pts[0], flagged: true }]).unknown);
 });
 
 // ---- item 7: matching holds at the centre only ----

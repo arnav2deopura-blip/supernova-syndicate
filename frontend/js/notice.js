@@ -37,8 +37,8 @@ export function clearNotice(el) { el.hidden = true; el.replaceChildren(); }
 /** Plain-language messages for the situations every mode can hit (docs/IMPROVEMENT_PLAN.md §5). */
 export const NOTICES = {
   noCoverage: (band) => ({
-    tone: "empty", title: `SPHEREx hasn't imaged this spot in ${band} yet.`,
-    why: "The survey is still filling in the sky, one pass every ~6 months. Another band may already have data here.",
+    tone: "empty", title: `No usable ${band} observations are available for this request.`,
+    why: "Coverage, data quality, wavelength selection, or the available release may limit this result. Try another band or a nearby region.",
   }),
   onePass: (label) => ({
     tone: "empty", title: "Only one pass so far — nothing to compare yet.",

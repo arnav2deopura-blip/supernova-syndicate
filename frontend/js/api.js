@@ -1,7 +1,8 @@
 // All network calls live here. Owner: C (safeguards ported from Z's "frontend pass 1").
 // Order of fallbacks: live backend -> precomputed/<preset>/ (only when it matches the request exactly).
 // Synthetic mock data is shown only when asked for with ?mock: never as a silent stand-in for a failed search.
-// ?verify=1 proves the live path: saved data is never read and never used as a fallback.
+// ?fresh=1 ("Backend only", alias ?verify=1) proves the live path: saved data is never read and never used as a
+// fallback; an outage is a visible error.
 
 // Which backend: the deployed one by default. Override with ?api=local (a backend on this machine, port 8000)
 // or ?api=https://host; the choice is remembered in this browser until ?api=default.
@@ -27,16 +28,20 @@ export const apiParam = () => (API_BASE === DEPLOYED_API ? null : API_BASE === L
 
 const params = () => (typeof location === "undefined" ? new URLSearchParams() : new URLSearchParams(location.search));
 const isDemo = () => params().has("mock");
-/** ?verify=1: never read precomputed/, never fall back; an outage is a visible error. */
-export const isVerify = () => params().has("verify");
+/** ?fresh=1 or ?verify=1: never read precomputed/, never fall back; an outage is a visible error. */
+export const strictFresh = () => params().has("fresh") || params().has("verify");
+export const isVerify = strictFresh;
 // The five test targets have saved bakes from the same pipeline and release: use them first so a demo never waits
-// on a server rebuild. ?fresh=1 (and ?verify=1) always ask the backend.
-const preferSaved = () => !params().has("fresh") && !isVerify();
+// on a server rebuild. Strict mode always asks the backend.
+const preferSaved = () => !strictFresh();
 export const BAKE_FOV = 0.1;   // every saved bake is a 0.1° field
 const TIMEOUT_MS = 45000;      // one request (a cold container can take a while to wake); long builds are jobs
-export const STALL_MS = 120000;        // a job with no progress for this long asks the user what to do
-export const JOB_LIMIT_MS = 30 * 60000; // no job is waited on longer than this
-const MAX_PIXELS = 1500000;    // a 0.5° field at 3.075″ is 586² ≈ 343k pixels; anything far larger is malformed
+export const STALL_MS = 120000;           // a job with no progress for this long asks the user what to do
+export const STALL_LIMIT_MS = 5 * 60000;  // ...and fails after this long when nobody can be asked (docs/API.md)
+export const JOB_LIMIT_MS = 20 * 60000;   // no job is waited on longer than this (docs/API.md)
+const MAX_PIXELS = 1024 * 1024;  // a 0.5° field at 3.075″ is 586² ≈ 343k pixels; anything far larger is malformed
+const MAX_FRAMES = 200;
+const MAX_BYTES = 64 * 1024 * 1024;
 /** Poll every second at first, then less often: a long build does not need 1 Hz polling. */
 export const pollDelay = (elapsedMs) => (elapsedMs < 20000 ? 1000 : elapsedMs < 120000 ? 2000 : 4000);
 
@@ -68,6 +73,42 @@ export function withTimeout(signal, ms = TIMEOUT_MS) {
   return { signal: ac.signal, state, done: () => { clearTimeout(timer); signal?.removeEventListener("abort", onAbort); } };
 }
 
+/**
+ * Read a response body with a size cap and a transfer deadline: a stalled or oversized download fails instead of
+ * hanging or exhausting memory.
+ */
+async function readBody(response, signal, maxBytes = MAX_BYTES) {
+  aborted(signal);
+  const reader = response.body?.getReader?.();
+  let timer, cancel;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => { reader?.cancel().catch(() => {}); reject(new ApiError("The data transfer stalled. Please retry.")); }, TIMEOUT_MS);
+    cancel = () => { reader?.cancel().catch(() => {}); reject(new DOMException("Cancelled", "AbortError")); };
+    signal?.addEventListener("abort", cancel, { once: true });
+  });
+  const read = async () => {
+    if (!reader) {
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (bytes.length > maxBytes) throw new ApiError("The data response is too large.", "invalid_response");
+      return bytes;
+    }
+    const chunks = []; let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) { await reader.cancel(); throw new ApiError("The data response is too large. Choose a smaller field of view.", "invalid_response"); }
+      chunks.push(value);
+    }
+    aborted(signal);
+    const bytes = new Uint8Array(total); let off = 0;
+    for (const c of chunks) { bytes.set(c, off); off += c.length; }
+    return bytes;
+  };
+  try { return await Promise.race([read(), deadline]); }
+  finally { clearTimeout(timer); signal?.removeEventListener("abort", cancel); }
+}
+
 async function fetchJSON(url, signal) {
   aborted(signal);
   const t = withTimeout(signal);
@@ -79,8 +120,9 @@ async function fetchJSON(url, signal) {
       throw new ApiError(t.state.timedOut || e.name === "TimeoutError" ? "The data service took too long to respond. Please retry." : "The data service is unavailable.");
     }
     let body;
-    try { body = await res.json(); }
+    try { body = JSON.parse(new TextDecoder().decode(await readBody(res, signal))); }
     catch (e) {
+      if (e instanceof ApiError || e.name === "AbortError") throw e;
       if (signal?.aborted) throw new DOMException("Cancelled", "AbortError");
       if (t.state.timedOut) throw new ApiError("The data service took too long to respond. Please retry.");
       if (res.ok) throw new ApiError("The data service returned an unreadable response. Please retry.", "invalid_response");
@@ -120,11 +162,19 @@ const clean = (q) => Object.fromEntries(Object.entries(q).filter(([, v]) => v !=
 function tag(data, kind, label) {
   if (!data || typeof data !== "object") return data;
   const own = data.provenance && typeof data.provenance === "object" ? data.provenance : {};
-  const origin = kind === "live" ? own.origin || data._origin || null : null;
+  const fromBackend = data.retrieval?.kind === "built" ? "processed_now" : data.retrieval?.kind === "server_cache" ? "server_cache" : null;
+  const origin = kind === "live" ? own.origin || fromBackend || data._origin || null : null;
   const job = data._job || null;
   delete data._origin; delete data._job;
-  return Object.assign(data, { _provenance: { kind, label, origin, job, counts: own.counts || null, complete: own.complete ?? null,
-    access_path: own.access_path || null, built_at: own.built_at || null, pipeline_version: own.pipeline_version || null } });
+  // completeness counts: the backend's `completeness` block (docs/API.md), else a proposed `provenance.counts`
+  const c = data.completeness && typeof data.completeness === "object" ? data.completeness : null;
+  const counts = c ? Object.fromEntries(Object.entries({ selected: c.selected, retrieved: c.downloaded_or_cached, failed: c.failed, "off chip": c.off_chip })
+    .filter(([, v]) => Number.isFinite(v))) : own.counts || null;
+  const complete = c && Number.isFinite(c.failed) ? c.failed === 0 : own.complete ?? null;
+  return Object.assign(data, { _provenance: { kind, label, origin, job, counts: counts && Object.keys(counts).length ? counts : null, complete,
+    access_path: own.access_path || null, built_at: own.built_at || null,
+    pipeline_version: own.pipeline_version || (own.processing_sha256 ? `processing ${String(own.processing_sha256).slice(0, 12)}` : null),
+    config: own.config_sha256 ? String(own.config_sha256).slice(0, 12) : null } });
 }
 
 const separationRA = (a, b) => Math.abs(((a - b + 540) % 360) - 180);
@@ -218,7 +268,7 @@ async function loadArray(ref, signal, expected) {
       const declared = Number(res.headers?.get?.("content-length"));
       // a gzip transfer reports the compressed size, so only an over-large declared size is a reliable error
       if (Number.isFinite(declared) && declared > MAX_PIXELS * 4) throw unreadable("image file too large");
-      const buf = await res.arrayBuffer();
+      const buf = (await readBody(res, signal, MAX_PIXELS * 4 + 4)).buffer;
       if (buf.byteLength % 4) throw new ApiError("An image file has an invalid size.", "invalid_response");
       if (expected && buf.byteLength !== expected * 4) throw unreadable(`image file has ${buf.byteLength / 4} pixels, the grid needs ${expected}`);
       if (buf.byteLength > MAX_PIXELS * 4) throw unreadable("image file too large");
@@ -228,17 +278,20 @@ async function loadArray(ref, signal, expected) {
       return out;
     }
     let arr;
-    try { arr = await res.json(); } catch { throw unreadable("image file is not JSON"); }
+    try { arr = JSON.parse(new TextDecoder().decode(await readBody(res, signal, MAX_PIXELS * 24))); }
+    catch (e) { if (e instanceof ApiError || e.name === "AbortError") throw e; throw unreadable("image file is not JSON"); }
     if (!Array.isArray(arr) || (expected && arr.length !== expected)) throw unreadable("image array of the wrong size");
     return arr;
   } finally { t.done(); }
 }
 
 /** Shape checks a /frames response must pass before its images are downloaded. */
+export function validateEnvelope(resp) { precheckFrames(resp); return resp; }
 function precheckFrames(resp) {
   if (!isObj(resp)) throw unreadable("frames: not an object");
   const n = checkWCS(resp.wcs);
   if (!Array.isArray(resp.frames)) throw unreadable("frames: no frame list");
+  if (resp.frames.length > MAX_FRAMES || resp.frames.length * n > 16 * MAX_PIXELS) throw unreadable("frames: more images than this page accepts");
   for (const f of resp.frames) if (!isObj(f)) throw new ApiError("An observation has missing or invalid metadata.", "invalid_response");
   return n;
 }
@@ -251,6 +304,8 @@ async function inlineFrameData(resp, signal) {
     try {
       f.noise = f.noise ? await loadArray(f.noise, signal, n) : null;
       if (f.noise && f.noise.length !== f.data?.length) f.noise = null;
+      // a noise value must be a positive number; anything else is "no noise known" for that pixel
+      if (f.noise) f.noise = f.noise.map((v) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null));
     } catch (e) { if (e.name === "AbortError") throw e; f.noise = null; }
   }));
   return resp;
@@ -261,6 +316,9 @@ async function inlineCubeData(resp, signal) {
   if (!isObj(resp)) throw unreadable("cube: not an object");
   const n = checkWCS(resp.wcs);
   if (!Array.isArray(resp.channels)) throw unreadable("cube: no channel list");
+  if (resp.channels.length > 17) throw unreadable("cube: more than 17 channels in one detector");
+  const images = resp.channels.reduce((a, ch) => a + (Array.isArray(ch?.frames) ? ch.frames.length : 1), 0);
+  if (images * n > 16 * MAX_PIXELS) throw unreadable("this spectral cube is too large for the browser; choose a smaller field of view");
   const jobs = [];
   for (const ch of resp.channels) {
     if (!isObj(ch)) throw unreadable("cube: a channel entry is not an object");
@@ -281,12 +339,16 @@ export function validateCube(c) {
   const n = checkWCS(c.wcs);
   if (typeof c.det !== "string" || !/^D[1-6]$/.test(c.det)) throw unreadable("cube: unknown detector");
   if (!Array.isArray(c.channels)) throw unreadable("cube: no channel list");
+  if (!c.channels.length) throw new ApiError("No spectral channels are available for this region.", "not_found");
+  const seen = new Set();
   for (const ch of c.channels) {
-    if (!isObj(ch) || typeof ch.channel !== "string" || !/^D[1-6]C\d{2}$/.test(ch.channel)) throw unreadable("cube: a channel has no valid identifier");
-    if (ch.lam_um != null && !fin(ch.lam_um)) throw unreadable(`cube: ${ch.channel} has an invalid wavelength`);
+    if (!isObj(ch) || typeof ch.channel !== "string" || !new RegExp(`^${c.det}C(0[1-9]|1[0-7])$`).test(ch.channel) || seen.has(ch.channel)) throw unreadable("cube: a channel has no valid or a repeated identifier");
+    seen.add(ch.channel);
+    if (!fin(ch.lam_um) || ch.lam_um <= 0) throw unreadable(`cube: ${ch.channel} has an invalid wavelength`);
     if (ch.data != null && (!Array.isArray(ch.data) || ch.data.length !== n)) throw unreadable(`cube: ${ch.channel} image has the wrong size`);
     for (const f of ch.frames || []) {
       if (typeof f.epoch_label !== "string" || !Array.isArray(f.data) || f.data.length !== n) throw unreadable(`cube: ${ch.channel} per-pass image is invalid`);
+      if (c.per_pass && !fin(f.mjd_mean)) throw unreadable(`cube: ${ch.channel} per-pass entry has no time`);
     }
   }
   return c;
@@ -352,6 +414,12 @@ const checkJob = (j) => {
   return j;
 };
 
+/** Job status and result URLs must stay on the backend that issued them. */
+function sameOrigin(u) {
+  try { const url = new URL(u, API_BASE); if (url.origin === new URL(API_BASE).origin) return url.href; } catch { /* invalid */ }
+  throw new ApiError("The service returned a job link to another site.", "invalid_response");
+}
+
 /** Mark a live body with how it was produced (read by tag()). */
 const withOrigin = (body, origin, job = null) => {
   if (isObj(body)) Object.defineProperty(body, "_origin", { value: origin, configurable: true, writable: true, enumerable: false });
@@ -387,7 +455,7 @@ async function runJob(url, { onProgress = () => {}, onStall = null, signal } = {
   let first = await submit();
   if (first.status !== 202) return withOrigin(first.body, "server_cache");
   let job = checkJob(first.body);
-  let statusURL = job.status_url || `${API_BASE}/api/jobs/${job.job_id}`;
+  let statusURL = sameOrigin(job.status_url || `${API_BASE}/api/jobs/${job.job_id}`);
   let resubmitted = false, sig = null, lastChange = Date.now(), files = 0;
   for (;;) {
     const s = `${job.state}|${job.stage}|${job.done}|${job.total}|${job.message}`;
@@ -396,16 +464,17 @@ async function runJob(url, { onProgress = () => {}, onStall = null, signal } = {
     onProgress(job);
     if (job.state === "done") {
       if (!job.result?.result_url) throw new ApiError("The finished job has no result URL.", "invalid_response");
-      const body = await getJSON(job.result.result_url, signal);
+      const body = await getJSON(sameOrigin(job.result.result_url), signal);
+      if (isObj(body) && job.result.retrieval) body.retrieval = job.result.retrieval;
       return withOrigin(body, "processed_now", { files: files || null, seconds: Math.round((Date.now() - t0) / 1000) });
     }
     if (job.state === "error") throw new ApiError(job.message || "The backend could not build this product.", job.error || "upstream_unavailable");
     const now = Date.now();
     if (now - t0 > JOB_LIMIT_MS) throw new ApiError("The server has worked on this for over 30 minutes without finishing. Please try again later.", "timeout");
-    if (now - lastChange > STALL_MS) {
+    if (now - lastChange > (onStall ? STALL_MS : STALL_LIMIT_MS)) {
       const answer = onStall ? await onStall(job) : null;
       aborted(signal);
-      if (answer !== "wait") throw new ApiError("The server reported no progress for 2 minutes.", "stalled");
+      if (answer !== "wait") throw new ApiError("Processing stopped reporting progress. Retry this search to resume from cached downloads.", "stalled");
       lastChange = Date.now();
     }
     await sleep(pollDelay(now - t0), signal);
@@ -418,7 +487,7 @@ async function runJob(url, { onProgress = () => {}, onStall = null, signal } = {
       first = await submit();
       if (first.status !== 202) return withOrigin(first.body, "server_cache");
       job = checkJob(first.body);
-      statusURL = job.status_url || `${API_BASE}/api/jobs/${job.job_id}`;
+      statusURL = sameOrigin(job.status_url || `${API_BASE}/api/jobs/${job.job_id}`);
       sig = null;
     }
   }
@@ -432,14 +501,19 @@ export const api = {
 
   /** Frames for one band. Uses the async job flow so cold positions show progress instead of hanging. */
   frames: (q, { preset, onProgress, onStall, signal, savedOnly } = {}) => {
-    const query = { ra: q.ra, dec: q.dec, fov: q.fov, band: q.band, matched: q.matched ? 1 : undefined };
+    const query = { ra: q.ra, dec: q.dec, fov: q.fov, band: q.band, matched: q.matched ? 1 : undefined, retry_missing: q.retryMissing ? 1 : undefined };
     return call("frames", query, {
       preset, signal, savedOnly,
       live: () => runJob(liveURL("frames", query), { onProgress, onStall, signal }),
       files: [q.matched ? `frames_matched_${q.band}.json` : "frames.json"],
       // a preset bake covers one field, band and FOV: only use it when it matches the request exactly
       accept: (d) => matchesSavedField(d, q) && !!d.matched === !!q.matched,
-    }).then((r) => inlineFrameData(r, signal)).then(validateFrames);
+    }).then((r) => {
+      precheckFrames(r);
+      // a well-formed answer for another field, band or size is still the wrong answer
+      if (!isDemo() && (!matchesSavedField(r, q) || !!r.matched !== !!q.matched)) throw unreadable("the images do not match the requested coordinates, band or field of view");
+      return inlineFrameData(r, signal);
+    }).then(validateFrames);
   },
 
   // the exposures and overlay bakes don't record their field: the app only names a preset for its exact centre,

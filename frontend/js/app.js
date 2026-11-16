@@ -8,7 +8,7 @@
 // Layout (FRONTEND_UPGRADE_PLAN §6): A top bar · B context bar · C view tabs · D stage · E inspector ·
 // F time dock · G status bar. The target picker is a sheet over the viewer.
 // URL: ?mode=&ra=&dec=&fov=&band=&matched=&name=&view=&a=&b=&ch=lo-hi&tour=1&embed=1&api=&fresh=1&verify=1&mock=1
-import { api, setFallbackHandler, apiLabel, apiParam, isVerify, API_BASE, DEPLOYED_API } from "./api.js";
+import { api, setFallbackHandler, apiLabel, apiParam, strictFresh, API_BASE, DEPLOYED_API } from "./api.js";
 import { parseCoord } from "./coordinates.js";
 import { Player } from "./player.js";
 import { draw, sumFrames, gradientCSS } from "./render.js";
@@ -38,8 +38,10 @@ const PRESETS = [
 ];
 const PRESET_EPOCH = 2026.871;
 const MODES = ["explore", "name", "coords"];
-const VIEWS = ["blink", "diff", "changes", "sum", "colours"];
-const VIEW_NAMES = { blink: "Play passes", diff: "Difference", changes: "Changes (σ)", sum: "Sum", colours: "Colours" };
+const VIEWS = ["blink", "smooth", "pair", "diff", "changes", "sum", "colours"];
+const VIEW_NAMES = { blink: "Play passes", smooth: "Smooth", pair: "Side by side", diff: "Difference", changes: "Changes (σ)", sum: "Sum", colours: "Colours" };
+const PLAYING_VIEWS = ["blink", "smooth", "colours"];   // views that step through frames on a timer
+const AB_VIEWS = ["pair", "diff", "changes"];            // views that compare pass A with pass B
 const RECENT_KEY = "sse.recentNames";
 const ADV_KEY = "sse.advancedOpen";
 const SEEN_KEY = "sse.lastDataThrough";
@@ -48,7 +50,8 @@ const MATCH_RADIUS_ARCSEC = 180;   // wavelengths are matched at the centre; bri
 const SAFE_FPS = 3;                // no more than three flashes a second without an explicit opt-in (WCAG 2.3.1)
 const REDUCED_MOTION = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const qp0 = new URLSearchParams(location.search);
-const LIVE_ONLY = qp0.has("fresh") || qp0.has("verify");   // never substitute the saved demo positions
+// "Backend only" (?fresh=1, alias ?verify=1): never substitute saved data or the saved demo positions
+const liveOnly = () => strictFresh();
 const store = {
   get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
   set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* storage blocked */ } },
@@ -81,6 +84,8 @@ const ui = {
   views: [...document.querySelectorAll("[data-view]")], ab: $("ab"), passA: $("pass-a"), passB: $("pass-b"), abHint: $("ab-hint"), sensitivity: $("sensitivity"),
   warnStrip: $("warn-strip"), notice: $("viewer-notice"), stageArea: $("stage-area"), stage: $("stage"), stageInner: $("stage-inner"),
   stageEmpty: $("stage-empty"), emptyPreset: $("empty-preset"), stageEmptyMsg: $("stage-empty-msg"), stageEmptyPick: $("stage-empty-pick"),
+  pairStage: $("pair-stage"), pairA: $("pair-a"), pairB: $("pair-b"), pairOverlayA: $("pair-overlay-a"), pairOverlayB: $("pair-overlay-b"),
+  pairLabelA: $("pair-label-a"), pairLabelB: $("pair-label-b"), liveOnly: $("live-only"), badgeExtra: $("badge-extra"),
   image: $("image"), imagePrev: $("image-prev"), overlay: $("overlay"), reticle: $("reticle"), legend: $("legend"), sigmaScale: $("sigma-scale"),
   cornerTL: $("corner-tl"), cornerTR: $("corner-tr"), cornerBL: $("corner-bl"), cornerBR: $("corner-br"), scalebar: $("scalebar"), scalebarLabel: $("scalebar-label"),
   cbar: $("cbar"), cbarHi: $("cbar-hi"), cbarLo: $("cbar-lo"), cbarRamp: $("cbar-ramp"), cbarUnit: $("cbar-unit"), cursor: $("cursor-readout"),
@@ -122,6 +127,8 @@ const state = {
   shown: null,         // what the stage shows now: {data, width, height, unit, limits, diverging}
   lastDrawn: null,     // key of the last frame drawn, for the crossfade
   apiVersion: null,
+  recording: false,    // a movie is being recorded: controls are locked
+  intensityValues: null, limitsFor: null,   // all pixel values of the shown passes, cached for the shared stretch
   jobAbort: null, spectrumAbort: null, coverageAbort: null, extraAbort: null, colourAbort: null,
 };
 
@@ -198,6 +205,17 @@ function setFov(side) {
   fovUI?.render();
 }
 
+// ---- "Backend only": strict ?fresh=1, the backend or a visible error, never a saved substitute ----
+ui.liveOnly.checked = strictFresh();
+ui.liveOnly.addEventListener("change", () => {
+  const url = new URL(location.href);
+  url.searchParams.delete("verify");
+  if (ui.liveOnly.checked) url.searchParams.set("fresh", "1"); else url.searchParams.delete("fresh");
+  history.replaceState(null, "", url);
+  if (state.target?.name) searchName(state.target.name, { band: ui.band.value });   // re-resolve the name live too
+  else if (state.target) loadTarget(state.target);
+});
+
 // ---- progress for long backend jobs (replaces the stage content) ----
 const STAGE_TEXT = {
   search: "Searching the archive", query: "Searching the archive", scan_folders: "Searching the archive", headers: "Reading image headers",
@@ -207,6 +225,7 @@ const STAGE_COUNT = { stamps: "Downloading", headers: "Reading", coadd: "Co-addi
 let stallAnswer = null;
 function showProgress(title, job = null, t0 = null) {
   ui.progress.hidden = false;
+  ui.viewer.setAttribute("aria-busy", "true");
   if (job && job.total) { ui.progressBar.max = job.total; ui.progressBar.value = job.done; }
   else ui.progressBar.removeAttribute("value");   // indeterminate
   ui.progressTitle.textContent = title;
@@ -216,7 +235,7 @@ function showProgress(title, job = null, t0 = null) {
   ui.progressHint.hidden = !job;
   ui.progressWait.hidden = ui.progressRetry.hidden = true;
 }
-function hideProgress() { ui.progress.hidden = true; ui.progressWait.hidden = ui.progressRetry.hidden = true; stallAnswer?.("cancel"); stallAnswer = null; }
+function hideProgress() { ui.progress.hidden = true; ui.viewer.setAttribute("aria-busy", "false"); ui.progressWait.hidden = ui.progressRetry.hidden = true; stallAnswer?.("cancel"); stallAnswer = null; }
 function jobTitle(job) {
   if (job.restarted) return "The server restarted; your request was sent again.";
   return job.message || STAGE_TEXT[job.stage] || (job.state === "queued" ? "Waiting for a free worker" : "Working");
@@ -237,6 +256,7 @@ ui.progressRetry.addEventListener("click", () => stallAnswer?.("retry"));
 
 // ---- viewer: which frames, which passes ----
 const passFrames = () => state.frames?.frames || [];
+const ready = () => passFrames().length > 0;
 const frameA = () => passFrames()[state.a];
 const frameB = () => passFrames()[state.b];
 const hasNoise = () => passFrames().length > 1 && !!frameA()?.noise && !!frameB()?.noise;
@@ -247,13 +267,15 @@ function setView(view, { silent = false } = {}) {
   if (!VIEWS.includes(view)) view = "blink";
   state.view = view;
   for (const b of ui.views) b.setAttribute("aria-checked", String(b.dataset.view === view));
-  ui.ab.hidden = !(view === "diff" || view === "changes") || passFrames().length < 2;
+  ui.ab.hidden = !AB_VIEWS.includes(view) || passFrames().length < 2;
   ui.filmstrip.hidden = view !== "colours";
   if (view !== "colours" && state.colourAbort) state.colourAbort.abort();
   if (view === "colours") loadColours();
-  else player.load(passFrames().length, view === "blink" ? state.index : null);
+  // static comparisons (Side by side, Difference, …) do not redraw on a timer
+  else player.load(passFrames().length, ["blink", "smooth"].includes(view) ? state.index : null, ["blink", "smooth"].includes(view));
   updatePlayerUI();
   updateNotice();
+  renderBadges();
   render();
   scheduleSize();
   if (!silent) writeURL();
@@ -389,7 +411,7 @@ function reproLines() {
   const warnings = [isSaturated() ? "target core saturated (OVERFLOW)" : null, !f?.matched && state.wl.kind === "detector" ? "wavelengths not matched: brightness not comparable" : null,
     p.complete === false ? "incomplete downloads" : null, p.kind === "mock" ? "SYNTHETIC mock data" : null].filter(Boolean);
   return [
-    ["tool", "SPHEREx Sky Explorer (NASA Space Apps 2026, Supernova Syndicate)"],
+    ["tool", "Sphere Shift (NASA Space Apps 2026)"],
     ["exported", new Date().toISOString()],
     ["url", location.href],
     ["data_release", f?.release || "unknown"],
@@ -416,6 +438,8 @@ function applyZoom() {
   const z = state.zoom;
   const c = zoomCentre();
   ui.stageInner.style.transform = z > 1 ? `scale(${z}) translate(${(0.5 - c.x) * 100}%, ${(0.5 - c.y) * 100}%)` : "";
+  // Side by side shares the zoom and placement
+  for (const inner of ui.pairStage.querySelectorAll(".pair-inner")) inner.style.transform = ui.stageInner.style.transform;
   ui.zoom.value = String(z);
   ui.image.classList.toggle("pannable", z > 1);
 }
@@ -464,7 +488,11 @@ function updateNotice() {
       { label: "Show Difference instead", onClick: () => setView("diff") }] });
     return;
   }
-  if ((state.view === "changes" || state.view === "diff") && !isMatched() && state.wl.kind === "detector") {
+  if (state.view === "smooth") {
+    showNotice(ui.notice, { tone: "info", title: "Smooth blends two observations.", why: "The in-between images are a visual transition, not extra observations. Use Play passes to judge motion or brightness." });
+    return;
+  }
+  if (AB_VIEWS.includes(state.view) && !isMatched() && state.wl.kind === "detector") {
     showNotice(ui.notice, {
       tone: "info", title: "Brightness changes here may not be real.",
       why: "Wavelengths are not matched, so each pass saw a slightly different mix of wavelengths. Motion is fine to judge; for brightness, match the wavelengths.",
@@ -480,16 +508,17 @@ function renderWarnings() {
   const lines = [];
   const line = (text, action) => el("div", { class: "wline" }, iconEl("alert"), el("span", { text }),
     action ? el("button", { type: "button", text: action.label, onclick: action.onClick }) : null);
-  if (state.frames) {
+  if (ready()) {
     if (isSaturated()) {
       const next = `D${Math.min(6, +ui.band.value.slice(1) + 1)}`;
       lines.push(line(`Saturated core in ${ui.band.value}: the target's centre overflows the detector, so its brightness and position there are less precise.`,
         ui.band.value === "D6" ? null : { label: `Try ${next}`, onClick: () => { ui.band.value = next; ui.band.dispatchEvent(new Event("change")); } }));
     }
-    const p = state.frames._provenance || {};
+    const p = shownProduct()?._provenance || {};
     if (p.complete === false) {
       const c = p.counts ? ` (${Object.entries(p.counts).map(([k, v]) => `${v} ${k}`).join(" · ")})` : "";
-      lines.push(line(`Incomplete: not every file for this view could be used${c}.`, { label: "Request again", onClick: () => loadTarget(state.target) }));
+      lines.push(line(`Incomplete: some input downloads failed${c}. Retry them before interpreting changes.`,
+        p.kind === "live" ? { label: "Retry missing downloads", onClick: () => loadTarget({ ...state.target, retryMissing: true }) } : null));
     }
     const rg = state.frames.range;
     if (rg?.skipped && passFrames().length >= 2) lines.push(line(`Compared only ${passFrames().map((f) => f.epoch_label).join(", ")}: ${rg.skipped} pass${rg.skipped === 1 ? " lacks" : "es lack"} a chosen channel.`, null));
@@ -507,8 +536,11 @@ function provLabel(p) {
   if (p.origin === "server_cache") return { text: "Server cache", tone: "tag-ok" };
   return { text: "From the server", tone: "tag-ok" };
 }
+/** The product on screen: the Colours cube in the Colours view, else the comparison frames. */
+const shownProduct = () => (state.view === "colours" && state.cube?.channels ? state.cube : state.frames);
 function renderProvenance() {
-  const p = state.frames?._provenance;
+  const product = ready() ? shownProduct() : null;
+  const p = product?._provenance;
   ui.provPop.hidden = !p;
   if (!p) return;
   const l = provLabel(p);
@@ -520,18 +552,20 @@ function renderProvenance() {
     live: p.origin === "processed_now" ? "The backend searched the archive and built this view for your request." : p.origin === "server_cache" ? "The backend answered at once from work it had already done for this exact request." : "The backend answered this request.",
   }[p.kind];
   const counts = p.counts ? Object.entries(p.counts).map(([k, v]) => `${v} ${k}`).join(" · ") : null;
-  const verifyURL = new URL(location.href); verifyURL.searchParams.set("verify", "1"); verifyURL.searchParams.delete("fresh");
   ui.provBody.replaceChildren(
     el("p", { text: why }),
     el("dl", {},
       el("dt", { text: "Source" }), el("dd", { text: p.kind === "live" ? `${apiLabel()} backend` : p.kind === "precomputed" ? "precomputed/ (this site)" : "mock/ (this site)" }),
-      el("dt", { text: "Release" }), el("dd", { text: state.frames.release || "unknown" }),
+      el("dt", { text: "Release" }), el("dd", { text: product.release || "unknown" }),
       ...(p.job?.seconds != null ? [el("dt", { text: "Built in" }), el("dd", { text: `${p.job.seconds} s` })] : []),
       ...(p.job?.files ? [el("dt", { text: "Files" }), el("dd", { text: `${p.job.files} downloaded` })] : []),
-      el("dt", { text: "Completeness" }), el("dd", { text: counts || "not reported by this backend version" }),
+      el("dt", { text: "Completeness" }), el("dd", { text: counts || "not reported for this product" }),
+      el("dt", { text: "Selection" }), el("dd", { text: product.completeness?.selection_policy || "bounded temporal sampling; not an exhaustive list of every exposure" }),
+      ...(p.pipeline_version ? [el("dt", { text: "Pipeline" }), el("dd", { text: `${p.pipeline_version}${p.config ? ` · config ${p.config}` : ""}` })]
+        : p.kind === "precomputed" ? [el("dt", { text: "Pipeline" }), el("dd", { text: "not recorded in this older saved product" })] : []),
       el("dt", { text: "Access path" }), el("dd", { text: p.access_path || "not reported" }),
-      el("dt", { text: "Mode" }), el("dd", { text: isVerify() ? "verify: saved data never used" : qp0.has("fresh") ? "fresh: backend asked first" : "default: saved test targets first" })),
-    isVerify() ? null : el("a", { class: "btn", href: verifyURL.href, text: "Reload with ?verify=1 (live only)" }));
+      el("dt", { text: "Mode" }), el("dd", { text: strictFresh() ? "Backend only: saved data never used" : "default: saved test targets first" })),
+    strictFresh() ? null : el("button", { type: "button", text: "Reload from the backend only", onclick: () => { ui.liveOnly.checked = true; ui.liveOnly.dispatchEvent(new Event("change")); } }));
 }
 function renderComparison() {
   const f = state.frames;
@@ -560,9 +594,13 @@ const rangeText = (wl) => {
   return `${det} channels ${wl.lo}–${wl.hi} · ≈${channelLam(det, wl.lo, state.lamTable).toFixed(2)}–${channelLam(det, wl.hi, state.lamTable).toFixed(2)} µm${wl.molecule ? ` (${MOLECULES.find((m) => m.id === wl.molecule)?.label}${wl.cont ? " continuum" : ""})` : ""}`;
 };
 function renderBadges() {
+  // tags describe a result, so they only show while there is one (#badges is empty otherwise)
   const out = [];
-  if (state.wl.kind === "range") out.push(el("span", { class: "badge", text: rangeText(state.wl) }));
-  ui.badges.replaceChildren(...out);
+  const colours = state.view === "colours" && state.cube?.channels;
+  if (ready() && colours) out.push(el("span", { class: "badge", text: `${state.cube.channels.length} spectral channels · passes combined` }));
+  else if (ready() && state.wl.kind === "range") out.push(el("span", { class: "badge", text: rangeText(state.wl) }));
+  ui.badgeExtra.replaceChildren(...out);
+  ui.cmpPop.hidden = !ready() || !!colours;
   renderProvenance();
   renderComparison();
   renderWarnings();
@@ -580,11 +618,16 @@ function renderWavelengthLabel() {
 // ---- rendering ----
 const UNIT = { blink: "MJy/sr", sum: "MJy/sr", diff: "Δ MJy/sr", changes: "σ", colours: "MJy/sr" };
 function render() {
-  ui.stageEmpty.hidden = !!state.frames;
+  const ok = ready();
+  const pairing = ok && state.view === "pair" && passFrames().length > 1;
+  ui.stageEmpty.hidden = ok;
   ui.stageEmptyMsg.hidden = !state.loadError;
   ui.stageEmptyPick.hidden = !!state.loadError;
-  for (const c of [ui.cornerTL, ui.cornerTR, ui.cornerBL, ui.cornerBR]) c.hidden = !state.frames;
-  if (!state.frames) {
+  ui.pairStage.hidden = !pairing;
+  ui.stage.hidden = pairing;
+  for (const c of [ui.savePng, ui.saveMovie]) c.disabled = !ok || state.recording;
+  for (const c of [ui.cornerTL, ui.cornerTR, ui.cornerBL, ui.cornerBR]) c.hidden = !ok;
+  if (!ok) {
     ui.image.getContext("2d").clearRect(0, 0, ui.image.width, ui.image.height);
     ui.overlay.getContext("2d").clearRect(0, 0, ui.overlay.width, ui.overlay.height);
     ui.reticle.getContext("2d").clearRect(0, 0, ui.reticle.width, ui.reticle.height);
@@ -600,7 +643,24 @@ function render() {
   let label = "", epoch = fr[state.index]?.epoch_label, showMarks = true, tl = "", tr = "";
   const view = fr.length < 2 && state.view !== "colours" ? "blink" : state.view;
   let shown = null, drawnKey = null;
-  if (view === "colours" && state.cube?.channels?.length) {
+  // one stretch for every pass, so brightness changes stay visible (cached: the values change only with the frames)
+  if (state.limitsFor !== fr) { state.limitsFor = fr; state.intensityValues = fr.flatMap((x) => x.data); }
+  const limitsFrom = state.intensityValues;
+  if (view === "pair") {
+    const A = frameA(), B = frameB();
+    for (const [f, cv, ov, lab, letter] of [[A, ui.pairA, ui.pairOverlayA, ui.pairLabelA, "A"], [B, ui.pairB, ui.pairOverlayB, ui.pairLabelB, "B"]]) {
+      draw(cv, f.data, wcs.width, wcs.height, { ...opts, limitsFrom });
+      lab.textContent = `${letter} · ${f.epoch_label} · ${mjdDate(f.mjd_mean ?? f.mjd_start)}`;
+      const po = prepareOverlay(ov, wcs, state.zoom);
+      if (ui.showOverlay.checked) drawGaia(po, state.sources, wcs, f.epoch_label);
+      if (ui.showEvents.checked) drawEvents(po, state.events.filter((e) => e.confidence !== "low" || ui.showLow.checked || e.id === state.selected), { selected: state.selected });
+      if (state.pick) drawPick(po, state.pick);
+    }
+    const lim = draw(ui.image, A.data, wcs.width, wcs.height, { ...opts, limitsFrom });
+    shown = { data: A.data, limits: lim, diverging: false, unit: UNIT.blink };
+    label = `A ${A.epoch_label} · B ${B.epoch_label} · shared stretch and zoom`;
+    epoch = null; showMarks = false;
+  } else if (view === "colours" && state.cube?.channels?.length) {
     const ch = state.cube.channels[state.colourIndex % state.cube.channels.length];
     const lim = draw(ui.image, ch.data, state.cube.wcs.width, state.cube.wcs.height, { ...opts, range: state.cube.display_range });
     shown = { data: ch.data, width: state.cube.wcs.width, height: state.cube.wcs.height, limits: lim, diverging: false, unit: UNIT.colours };
@@ -631,14 +691,15 @@ function render() {
   } else {
     const f = fr[state.index];
     drawnKey = `${state.frames.release}|${state.frames.ra}|${state.frames.dec}|${ui.band.value}|${f.epoch_label}`;
-    crossfadeFrom(drawnKey);
-    const lim = draw(ui.image, f.data, wcs.width, wcs.height, { ...opts, limitsFrom: fr.flatMap((x) => x.data) });
+    crossfadeFrom(drawnKey, view);
+    const lim = draw(ui.image, f.data, wcs.width, wcs.height, { ...opts, limitsFrom });
     shown = { data: f.data, limits: lim, diverging: false, unit: UNIT.blink };
     label = `${f.epoch_label} · ${mjdDate(f.mjd_mean ?? f.mjd_start)} (${state.index + 1}/${fr.length})`;
     tl = `${f.epoch_label} · ${mjdDate(f.mjd_mean ?? f.mjd_start)}`;
-    tr = fr.length > 1 && state.a !== state.b ? `Play passes · A ${frameA().epoch_label} → B ${frameB().epoch_label}` : "Play passes";
+    tr = fr.length > 1 && state.a !== state.b ? `${VIEW_NAMES[view] || "Play passes"} · A ${frameA().epoch_label} → B ${frameB().epoch_label}` : VIEW_NAMES[view] || "Play passes";
   }
   state.lastDrawn = drawnKey;
+  if (view !== "smooth") ui.imagePrev.style.opacity = "0";
   if (shown) { shown.width ??= wcs.width; shown.height ??= wcs.height; }
   state.shown = shown;
   ui.frameLabel.textContent = label;
@@ -719,16 +780,19 @@ function drawReticle(wcs) {
   ui.scalebarLabel.textContent = L >= 60 ? `${L / 60}′` : `${L}″`;
 }
 
-/** Smooth: a 150 ms crossfade from the previous blink frame (off by default; never under reduced motion). */
-function crossfadeFrom(key) {
-  if (!ui.smooth.checked || REDUCED_MOTION || state.view !== "blink" || !state.lastDrawn || state.lastDrawn === key) return;
+/**
+ * Smooth view: a crossfade from the previous pass over most of the frame time. The blend is a visual transition,
+ * not an observation; Play passes keeps the hard cut that makes a mover jump. Never under reduced motion.
+ */
+function crossfadeFrom(key, view) {
+  if (view !== "smooth" || REDUCED_MOTION || !state.lastDrawn || state.lastDrawn === key) return;
   const p = ui.imagePrev;
   p.width = ui.image.width; p.height = ui.image.height;
   p.getContext("2d").drawImage(ui.image, 0, 0);
-  p.classList.remove("fading");
+  p.style.transition = "none";
   p.style.opacity = "1";
   void p.offsetWidth;   // commit the opaque state before fading
-  p.classList.add("fading");
+  p.style.transition = `opacity ${Math.round(Math.min(700, 700 / player.fps))}ms linear`;
   p.style.opacity = "0";
 }
 
@@ -739,12 +803,14 @@ const player = new Player((i) => {
   if (state.view === "colours") highlightFilmstrip();
 });
 if (REDUCED_MOTION) player.playing = false;   // respect "reduced motion": start paused
+// no animation in a hidden tab; the position and the play/pause choice are kept
+document.addEventListener("visibilitychange", () => { player.setSuspended(document.hidden); if (!document.hidden) render(); });
 
 function updatePlayerUI() {
   ui.play.innerHTML = icon(player.playing ? "pause" : "play");
   ui.play.setAttribute("aria-label", player.playing ? "Pause" : "Play");
-  const moving = state.view === "blink" || state.view === "colours";
-  for (const b of [ui.play, ui.prev, ui.next]) b.disabled = !moving || player.count < 2;
+  const moving = PLAYING_VIEWS.includes(state.view);
+  for (const b of [ui.play, ui.prev, ui.next]) b.disabled = state.recording || !moving || player.count < 2;
   // announce frames only while paused: a live region that changes twice a second is noise
   ui.frameLabel.setAttribute("aria-live", player.playing ? "off" : "polite");
 }
@@ -854,14 +920,16 @@ async function measureSpectrum(ra, dec) {
     if (ui.advanced.open) refreshAdvanced();
   } catch (err) {
     if (err.name === "AbortError") return;
-    spectrumMessage(ui.spectrum, err.code === "not_found" ? "No source measured here." : err.code === "invalid_response" ? "The service returned a spectrum this page cannot read." : "Spectrum unavailable here offline (it needs the backend).");
+    if (ac.signal.aborted) return;
+    spectrumMessage(ui.spectrum, err.code === "not_found" ? "No source measured here." : err.code === "invalid_response" ? "The service returned a spectrum this page cannot read."
+      : err.code === "offline" ? "Spectrum unavailable here offline (it needs the backend)." : "Spectrum unavailable right now.");
     ui.spectrumNote.textContent = err.message || "";
   }
 }
 
 // image: click = spectrum (or select a marker), double-click = zoom, drag = pan when zoomed, move = readout
-const imagePoint = (e) => {
-  const r = ui.image.getBoundingClientRect();   // includes the zoom transform, so this maps correctly
+const imagePoint = (e, canvas = ui.image) => {
+  const r = canvas.getBoundingClientRect();   // includes the zoom transform, so this maps correctly
   const w = state.shown?.width ?? state.frames.wcs.width, h = state.shown?.height ?? state.frames.wcs.height;
   return { x: ((e.clientX - r.left) / r.width) * w, y: ((e.clientY - r.top) / r.height) * h, w, h };
 };
@@ -896,10 +964,10 @@ const endPan = () => {
 ui.image.addEventListener("pointerup", endPan);
 ui.image.addEventListener("pointercancel", endPan);
 ui.image.addEventListener("pointerleave", () => { if (!pan) ui.cursor.textContent = "Point at the image for position and value"; });
-ui.image.addEventListener("click", (e) => {
-  if (!state.frames) return;
+function clickImage(e, canvas) {
+  if (!ready()) return;
   if (suppressClick) { suppressClick = false; return; }
-  const { x, y } = imagePoint(e);
+  const { x, y } = imagePoint(e, canvas);
   const { wcs } = state.frames;
   // clicking a marker selects the event
   const hit = state.events.find((ev) => Math.hypot(ev.x - x, ev.y - y) < 3 && (ev.confidence !== "low" || ui.showLow.checked));
@@ -907,19 +975,26 @@ ui.image.addEventListener("click", (e) => {
   const { ra, dec } = pixelToSky(x, y, wcs);
   showInspector("spectrum");
   measureSpectrum(ra, dec);
-});
+}
+ui.image.addEventListener("click", (e) => clickImage(e, ui.image));
+for (const cv of [ui.pairA, ui.pairB]) {
+  cv.addEventListener("click", (e) => clickImage(e, cv));
+  cv.addEventListener("pointermove", (e) => updateCursor(e, cv));
+  cv.addEventListener("pointerleave", () => { ui.cursor.textContent = "Point at the image for position and value"; });
+}
 ui.image.addEventListener("dblclick", (e) => {
-  if (!state.frames) return;
+  if (!ready()) return;
   const { x, y } = imagePoint(e);
   zoomTo({ x, y }, state.zoom >= 4 ? 1 : state.zoom + 1);
 });
-function updateCursor(e) {
-  if (!state.frames || !state.shown) return;
-  const { x, y, w, h } = imagePoint(e);
+function updateCursor(e, canvas = ui.image) {
+  if (!ready() || !state.shown) return;
+  const { x, y, w, h } = imagePoint(e, canvas);
   if (x < 0 || y < 0 || x >= w || y >= h) return;
   const wcs = state.view === "colours" && state.cube ? state.cube.wcs : state.frames.wcs;
   const { ra, dec } = pixelToSky(x, y, wcs);
-  const v = state.shown.data[Math.floor(y) * w + Math.floor(x)];
+  const data = canvas === ui.pairB ? frameB().data : state.shown.data;
+  const v = data[Math.floor(y) * w + Math.floor(x)];
   const value = v == null ? "no data" : `${fmtVal(v)} ${state.shown.unit}`;
   ui.cursor.textContent = `${fmtSexa(ra, dec)}  ·  ${fmtDeg(ra, dec)}  ·  ${value}`;
 }
@@ -992,14 +1067,19 @@ async function loadRange(ac) {
     rememberLams(cube);
     const r = framesFromCube(cube, lo, hi, state.base.frames);
     // coverage of the whole detector, for the hollow ticks on the ruler
-    const gaps = framesFromCube(cube, 1, N_CH).missing.map((m) => m.k);
+    const gaps = framesFromCube(cube, 1, N_CH).gaps.map((m) => m.k);
     state.coverage = { det: cube.det, gaps: new Set(gaps) };
     if (r.missing.length && !state.wl.skipOk) return { blocked: { r, cube, lo, hi } };
     const lams = r.channels.map((c) => channelLam(ui.band.value, +c.slice(-2), state.lamTable));
-    return { ...state.base, wcs: cube.wcs, frames: r.frames, matched: true, matched_channels: r.channels,
+    // everything about this product comes from the cube it was cut from, nothing from the whole-band frames
+    const used = new Set(r.frames.flatMap((f) => f.obs_ids || []));
+    return { ra: cube.ra, dec: cube.dec, fov: cube.fov, band: cube.det, units: cube.units, release: cube.release,
+      inputs: cube.selected_input_records?.filter((rec) => used.has(rec.obs_id)),
+      comparison_scope: cube.channel_at === "pixel" ? "pixel" : "field_centre_quicklook",
+      wcs: cube.wcs, frames: r.frames, matched: true, matched_channels: r.channels,
       lam_eff_um: lams.length ? lams.reduce((a, b) => a + b, 0) / lams.length : null,
-      _provenance: cube._provenance, release: cube.release || state.base.release,
-      range: { lo, hi, skipped: r.skipped, suggest: r.frames.length < 2 ? suggestRange(cube, lo, hi) : null } };
+      _provenance: cube._provenance, retrieval: cube.retrieval, provenance: cube.provenance, completeness: cube.completeness,
+      range: { lo, hi, missing: r.missing, skipped: r.skipped, suggest: r.frames.length < 2 ? suggestRange(cube, lo, hi) : null } };
   } catch (e) {
     if (e.name === "AbortError") return null;
     state.loadError = {
@@ -1007,13 +1087,14 @@ async function loadRange(ac) {
       why: e.code === "offline" ? "They need the live backend; offline, only WISE 0855 (D6) has per-pass channels baked in." : e.message,
       actions: [{ label: "Use the whole band", primary: true, onClick: () => setWavelengths({ kind: "detector" }, { reload: true }) }],
     };
-    return state.base;
-  } finally { hideProgress(); }
+    // nothing is drawn: the whole band is not what was asked for
+    return { ra: state.base.ra, dec: state.base.dec, fov: state.base.fov, band: ui.band.value, wcs: state.base.wcs, frames: [], range: { lo, hi } };
+  } finally { if (!ac.signal.aborted) hideProgress(); }
 }
 
 /** The notice for a channel range with a gap: explicit choices, never a silent substitute. */
 function gapNotice({ r, cube, lo, hi }) {
-  const m = r.missing;
+  const m = r.gaps;
   const desc = m.length === 1
     ? `Channel ${m[0].k} has no coverage in pass${m[0].passes.length === 1 ? "" : "es"} ${m[0].passes.join(", ")}.`
     : `Channels ${m.map((x) => x.k).join(", ")} are missing from at least one pass (${[...new Set(m.flatMap((x) => x.passes))].join(", ")}).`;
@@ -1130,7 +1211,9 @@ const fitsURL = () => (state.base?._provenance?.kind === "live" && state.target 
   ? api.framesFitsURL({ ra: state.base.ra, dec: state.base.dec, fov: state.base.fov, band: ui.band.value, matched: ui.matched.checked }) : null);
 
 // ---- the one loader every mode ends in ----
-async function loadTarget({ ra, dec, label, name = null, pm = null, posNote = null }) {
+async function loadTarget({ ra, dec, label, name = null, pm = null, posNote = null, retryMissing = false }) {
+  if (state.recording) { showBanner("A movie is recording. Wait until its download is ready before changing targets."); return; }
+  nameAbort?.abort();
   state.jobAbort?.abort();
   state.extraAbort?.abort();
   state.spectrumAbort?.abort();
@@ -1140,7 +1223,7 @@ async function loadTarget({ ra, dec, label, name = null, pm = null, posNote = nu
   hideBanner();
 
   ra = ((ra % 360) + 360) % 360;
-  const q = { ra: +ra.toFixed(6), dec: +dec.toFixed(6), fov: fovValue(), band: ui.band.value, matched: ui.matched.checked };
+  const q = { ra: +ra.toFixed(6), dec: +dec.toFixed(6), fov: fovValue(), band: ui.band.value, matched: ui.matched.checked, retryMissing };
   const prev = state.target;
   const sameField = prev && sepDeg(prev.ra, prev.dec, q.ra, q.dec) < 1e-6;
   state.target = { ra: q.ra, dec: q.dec, label: label || fmtDeg(q.ra, q.dec), name, pm, posNote: posNote ?? (sameField ? prev.posNote : null) };
@@ -1151,7 +1234,7 @@ async function loadTarget({ ra, dec, label, name = null, pm = null, posNote = nu
   syncSky();
 
   const t0 = Date.now();
-  showProgress(state.preset && !LIVE_ONLY ? "Loading saved observations…" : "Asking the backend for frames…");
+  showProgress(state.preset && !liveOnly() ? "Loading saved observations…" : "Asking the backend for frames…");
   let frames;
   try {
     frames = await api.frames(q, {
@@ -1174,11 +1257,15 @@ async function loadTarget({ ra, dec, label, name = null, pm = null, posNote = nu
     } else if (e.code === "invalid_response") {
       state.loadError = { ...NOTICES.badResponse(e.message), actions: [{ label: "Retry", primary: true, onClick: () => loadTarget(state.target) }] };
     } else if (e.code === "stalled") {
-      state.loadError = { ...NOTICES.stalled(), actions: [{ label: "Retry", primary: true, onClick: () => loadTarget(state.target) }] };
+      state.loadError = { ...NOTICES.stalled(), why: e.message, actions: [{ label: "Retry", primary: true, onClick: () => loadTarget(state.target) }] };
+    } else if (e.code === "bad_request" || e.code === "busy") {
+      state.loadError = { tone: "error", title: e.code === "busy" ? "The processing queue is busy." : "This request needs different settings.", why: e.message, actions: [
+        ...(e.code === "bad_request" && q.fov > 0.04 ? [{ label: "Try 0.04°", primary: true, onClick: () => { setFov(0.04); loadTarget(state.target); } }] : []),
+        { label: "Retry", primary: e.code !== "bad_request" || q.fov <= 0.04, onClick: () => loadTarget(state.target) }] };
     } else {
-      state.loadError = { ...NOTICES.backendDown(e.message, isVerify()), actions: [
+      state.loadError = { ...NOTICES.backendDown(e.message, strictFresh()), actions: [
         { label: "Retry", primary: true, onClick: () => loadTarget(state.target) },
-        ...(isVerify() ? [] : [{ label: "Try Barnard's Star", onClick: () => choosePreset(PRESETS[0]) }])] };
+        ...(strictFresh() ? [] : [{ label: "Try Barnard's Star", onClick: () => choosePreset(PRESETS[0]) }])] };
     }
     updateNotice(); renderEvents(); renderBadges(); render(); renderTimeline(); closePicker();
     return;
@@ -1234,7 +1321,9 @@ async function loadTarget({ ra, dec, label, name = null, pm = null, posNote = nu
   closePicker();
   writeURL();
 
-  // extras: Gaia overlay and the movers search (both feed the events). Every late answer checks that its
+  // extras: the Gaia overlay always (small). The movers search and the light curve also feed the events: they run
+  // now for the saved test targets (bundled files, nothing to build), and for any other position only when Details
+  // is opened, so a new field does not start three slow backend builds at once. Every late answer checks that its
   // request is still the current one before it writes state.
   const extra = state.extraAbort;
   const fieldKey = `${q.ra},${q.dec},${q.fov}`;
@@ -1246,17 +1335,33 @@ async function loadTarget({ ra, dec, label, name = null, pm = null, posNote = nu
   }
   state.movers = null;
   state.variability = null;
-  // a light curve only means something for a named object at the field centre (not an arbitrary patch of sky)
-  if (name || state.preset) {
-    state.adv.lightcurve = "loading";   // shared with the Details tab, so it is requested once
-    api.lightcurve({ ra: q.ra, dec: q.dec, det: q.band }, { preset: state.preset, signal: extra.signal })
-      .then((lc) => { if (!extra.signal.aborted) { state.variability = lc; state.adv.lightcurve = lc; computeEvents(); render(); if (ui.advanced.open) refreshAdvanced(); } })
-      .catch((e) => { if (e.name !== "AbortError" && !extra.signal.aborted) { state.adv.lightcurve = { error: e.code === "offline" ? "Needs the live backend for this position." : e.message }; if (ui.advanced.open) refreshAdvanced(); } });
-  }
-  api.movers({ ra: q.ra, dec: q.dec, fov: q.fov, band: q.band }, { preset: state.preset, signal: extra.signal })
-    .then((m) => { if (!extra.signal.aborted) { state.movers = m; computeEvents(); render(); if (ui.advanced.open) refreshAdvanced(); } })
-    .catch((e) => { if (e.name !== "AbortError" && !extra.signal.aborted) state.movers = { error: e.code === "offline" ? "The movers search needs the live backend for this position." : e.message }; });
+  const savedTarget = state.preset && frames._provenance?.kind === "precomputed";
+  if (savedTarget || ui.advanced.open) loadAnalyses();
   if (ui.advanced.open) loadAdvanced();
+}
+
+/**
+ * Movers search and light curve: both feed the change events. Requested once per target (shared with Details).
+ * A light curve only means something for a named object at the field centre, not an arbitrary patch of sky.
+ */
+function loadAnalyses() {
+  if (!state.base) return;
+  const extra = state.extraAbort, adv = state.adv;
+  const q = { ra: state.base.ra, dec: state.base.dec, fov: state.base.fov, band: ui.band.value };
+  const opts = { preset: state.preset, signal: extra.signal };
+  const offline = (e, what) => (e.code === "offline" ? `${what} needs the live backend for this position.` : e.message);
+  if (!adv.movers) {
+    adv.movers = "loading";
+    api.movers(q, opts)
+      .then((m) => { if (!extra.signal.aborted && state.adv === adv) { adv.movers = m; state.movers = m; computeEvents(); render(); if (ui.advanced.open) refreshAdvanced(); } })
+      .catch((e) => { if (e.name !== "AbortError" && !extra.signal.aborted && state.adv === adv) { adv.movers = { error: offline(e, "The movers search") }; state.movers = adv.movers; if (ui.advanced.open) refreshAdvanced(); } });
+  }
+  if (!adv.lightcurve && (state.target?.name || state.preset)) {
+    adv.lightcurve = "loading";
+    api.lightcurve({ ra: q.ra, dec: q.dec, det: q.band }, opts)
+      .then((lc) => { if (!extra.signal.aborted && state.adv === adv) { adv.lightcurve = lc; state.variability = lc; computeEvents(); render(); if (ui.advanced.open) refreshAdvanced(); } })
+      .catch((e) => { if (e.name !== "AbortError" && !extra.signal.aborted && state.adv === adv) { adv.lightcurve = { error: offline(e, "The light curve") }; if (ui.advanced.open) refreshAdvanced(); } });
+  }
 }
 
 ui.cancel.addEventListener("click", () => {
@@ -1327,18 +1432,20 @@ function loadAdvanced() {
       .catch((e) => { if (e.name !== "AbortError" && state.adv === adv) adv[key] = { error: e.code === "offline" ? "Needs the live backend for this position." : e.message }; })
       .finally(() => { if (state.adv === adv) refreshAdvanced(); });
   };
+  loadAnalyses();
   get("exposures", () => api.exposures({ ...q, fov: state.base.fov }, opts), renderTimeline);
   const det = ui.band.value;
   const pm = state.target?.pm;
-  get("motion", () => api.motion({ ...q, det, ...(pm ? { pmra: pm.pmra, pmdec: pm.pmdec, epoch: pm.epoch } : {}) }, opts));
-  get("lightcurve", () => api.lightcurve({ ...q, det }, opts));
+  // the proper-motion fit is for a named object at the centre, like the light curve
+  if (state.target?.name || state.preset) get("motion", () => api.motion({ ...q, det, ...(pm ? { pmra: pm.pmra, pmdec: pm.pmdec, epoch: pm.epoch } : {}) }, opts));
   refreshAdvanced();
 }
 function refreshAdvanced() {
   renderAdvanced(ui.advBody, {
+    displayedCube: state.view === "colours" && state.cube?.channels ? state.cube : null,
     target: state.target, resp: state.frames, band: ui.band.value, matched: isMatched(),
     exposures: state.adv.exposures, motion: state.adv.motion, lightcurve: state.adv.lightcurve,
-    movers: state.movers, events: state.events, spectrum: state.spectrum, threshold: THRESHOLD,
+    movers: state.adv.movers || state.movers, events: state.events, spectrum: state.spectrum, threshold: THRESHOLD,
     fitsURL: fitsURL(), sexa: state.target ? fmtSexa(state.target.ra, state.target.dec) : "", pick: state.pick,
     repro: state.frames ? reproLines() : [],
   });
@@ -1346,11 +1453,27 @@ function refreshAdvanced() {
 ui.advanced.open = store.get(ADV_KEY) === "1";
 ui.advanced.addEventListener("toggle", () => {
   store.set(ADV_KEY, ui.advanced.open ? "1" : "0");
+  // opening the drawer from anywhere (a link, a test, the tour) shows its tab
+  if (ui.advanced.open && $("ipanel-details").hidden) showInspector("details");
   if (ui.advanced.open) loadAdvanced();
 });
 
 // ---- saving: image and movie ----
 function composite(scale = 5) {
+  if (state.view === "pair" && !ui.pairStage.hidden) {
+    // both passes next to each other, with their overlays and the A/B labels
+    const W = ui.pairA.width * scale, H = ui.pairA.height * scale;
+    const c = document.createElement("canvas");
+    c.width = W * 2 + 8; c.height = H + 48;
+    const ctx = c.getContext("2d");
+    ctx.fillStyle = "#000"; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.imageSmoothingEnabled = false;
+    [[ui.pairA, ui.pairOverlayA], [ui.pairB, ui.pairOverlayB]].forEach(([img, ov], i) => { ctx.drawImage(img, i * (W + 8), 0, W, H); ctx.drawImage(ov, i * (W + 8), 0, W, H); });
+    ctx.fillStyle = tok("--ink-1"); ctx.font = '14px "IBM Plex Sans", system-ui, sans-serif';
+    ctx.fillText(ui.frameLabel.textContent, 8, H + 20);
+    ctx.fillText(`${state.title} — SPHEREx (NASA/IPAC)`, 8, H + 40);
+    return c;
+  }
   const W = ui.image.width * scale, H = ui.image.height * scale;
   const c = document.createElement("canvas");
   c.width = W; c.height = H + 28;
@@ -1364,7 +1487,7 @@ function composite(scale = 5) {
   return c;
 }
 ui.savePng.addEventListener("click", () => {
-  if (!state.frames) return;
+  if (!ready()) return;
   const saved = state.zoom; state.zoom = 1; applyZoom(); render();
   composite().toBlob((b) => {
     const url = URL.createObjectURL(b);
@@ -1375,36 +1498,56 @@ ui.savePng.addEventListener("click", () => {
   });
 });
 ui.saveMovie.addEventListener("click", async () => {
-  if (!state.frames || typeof MediaRecorder === "undefined") {
+  if (!ready()) return;
+  if (typeof MediaRecorder === "undefined" || !ui.image.captureStream) {
     showNotice(ui.notice, { tone: "empty", title: "This browser can't record a movie.", why: "Use Save image, or a recent Chrome, Edge or Firefox." });
     return;
   }
-  const view = state.view === "colours" && state.cube?.channels ? "colours" : "blink";
-  if (state.view !== view) setView(view, { silent: true });
-  const n = player.count, fps = +ui.speed.value;
-  const wasPlaying = player.playing;
-  if (player.playing) player.toggle();
-  const canvas = composite(); const ctx = canvas.getContext("2d");
-  const type = ["video/webm;codecs=vp9", "video/webm", "video/mp4"].find((t) => MediaRecorder.isTypeSupported(t));
-  const rec = new MediaRecorder(canvas.captureStream(Math.max(1, Math.round(fps))), type ? { mimeType: type } : undefined);
-  const chunks = [];
-  rec.ondataavailable = (e) => chunks.push(e.data);
-  const done = new Promise((r) => { rec.onstop = r; });
-  ui.saveMovie.disabled = true; ui.saveMovie.textContent = "Recording…";
-  rec.start();
-  for (let k = 0; k < n * 3; k++) {
-    player.index = k % n; player.onFrame(k % n);
-    ctx.drawImage(composite(), 0, 0);
-    await new Promise((r) => setTimeout(r, 1000 / fps));
+  const original = { view: state.view, index: player.index, playing: player.playing };
+  let recorder = null, stream = null, locked = [];
+  try {
+    // a movie is the blink (or the channels in Colours); the view on screen comes back afterwards
+    const view = state.view === "colours" && state.cube?.channels ? "colours" : "blink";
+    if (state.view !== view) setView(view, { silent: true });
+    if (!player.count) throw new Error("No frames to record.");
+    if (player.playing) player.toggle();
+    state.recording = true;
+    locked = [...document.querySelectorAll("main button, main input, main select")].map((c) => [c, c.disabled]);
+    for (const [c] of locked) c.disabled = true;
+    ui.saveMovie.textContent = "Recording…";
+    const fps = +ui.speed.value;
+    const canvas = composite(), ctx = canvas.getContext("2d");
+    const type = ["video/webm;codecs=vp9", "video/webm", "video/mp4"].find((t) => MediaRecorder.isTypeSupported(t));
+    if (!type) throw new Error("No supported movie format; save an image instead.");
+    stream = canvas.captureStream(Math.max(1, Math.round(fps)));
+    recorder = new MediaRecorder(stream, { mimeType: type });
+    const chunks = [];
+    recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    const done = new Promise((resolve, reject) => { recorder.onstop = resolve; recorder.onerror = (e) => reject(e.error || new Error("Recording failed")); });
+    recorder.start();
+    for (let k = 0; k < player.count * 3; k++) {
+      player.index = k % player.count; player.onFrame(player.index);
+      ctx.drawImage(composite(), 0, 0);
+      await new Promise((r) => setTimeout(r, 1000 / fps));
+    }
+    recorder.stop(); await done;
+    const url = URL.createObjectURL(new Blob(chunks, { type }));
+    const a = el("a", { href: url, download: `spherex-${state.preset || "field"}.${type.includes("mp4") ? "mp4" : "webm"}` });
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  } catch (e) {
+    showBanner(`Movie export failed: ${e.message}`);
+  } finally {
+    if (recorder?.state === "recording") recorder.stop();
+    stream?.getTracks().forEach((t) => t.stop());
+    state.recording = false;
+    for (const [c, was] of locked) c.disabled = was;
+    ui.saveMovie.textContent = "Save movie";
+    setView(original.view, { silent: true });
+    if (PLAYING_VIEWS.includes(original.view) && original.view !== "colours") player.load(player.count, original.index, true);
+    if (player.playing !== original.playing) player.toggle();
+    updatePlayerUI(); render();
   }
-  rec.stop(); await done;
-  const ext = (type || "video/webm").includes("mp4") ? "mp4" : "webm";
-  const url = URL.createObjectURL(new Blob(chunks, { type: type || "video/webm" }));
-  const a = el("a", { href: url, download: `spherex-${state.preset || "field"}.${ext}` });
-  document.body.append(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
-  ui.saveMovie.disabled = false; ui.saveMovie.textContent = "Save movie";
-  if (wasPlaying) { player.toggle(); updatePlayerUI(); }
 });
 
 /** Keep the sky map on the loaded target: draw its box, and move there if it is out of view. */
@@ -1446,7 +1589,7 @@ ui.showOnSky.addEventListener("click", () => {
   ensureSky().then(() => {
     if (!sky || !state.target) return;
     sky.goto(state.target.ra, state.target.dec, Math.max(0.6, fovValue() * 4));
-    sky.showFootprint(state.target.ra, state.target.dec, fovValue());
+    sky.select(state.target.ra, state.target.dec, fovValue());   // the loaded field is the selection to adjust
   });
 });
 ui.skyBtn.addEventListener("click", () => { setMode("explore"); openPicker(); });
@@ -1480,7 +1623,7 @@ ui.topSearch.addEventListener("submit", (e) => {
     setMode("coords");
     echoCoords();
     const p = nearestPreset(r.ra, r.dec);
-    loadTarget({ ra: r.ra, dec: r.dec, label: p ? p.label : `RA ${sexa(r.ra, true)}, Dec ${sexa(r.dec, false)}`, posNote: p && !LIVE_ONLY ? "Typed position; saved demo data exists for it" : "Typed position (ICRS), used as given" });
+    loadTarget({ ra: r.ra, dec: r.dec, label: p ? p.label : `RA ${sexa(r.ra, true)}, Dec ${sexa(r.dec, false)}`, posNote: p && !liveOnly() ? "Typed position; saved demo data exists for it" : "Typed position (ICRS), used as given" });
   } else {
     ui.name.value = r.name;
     setMode("name");
@@ -1529,20 +1672,27 @@ function positionNote(r, { savedDemo = false } = {}) {
   return savedDemo ? `Saved demo position: ${core}` : core;
 }
 
+let nameAbort = null;   // a newer lookup (or target) cancels an older one, so a slow answer can't win
 async function searchName(name, { band } = {}) {
+  nameAbort?.abort();
+  const lookup = new AbortController();
+  nameAbort = lookup;
   name = name.trim();
   if (!name) return;
   const preset = presetByName(name);
   if (band) ui.band.value = band;
+  else if (preset) ui.band.value = preset.band;
   showResult([["", `Looking up “${name}”…`]]);
   const bannerBefore = { level: fallbackLevel, text: ui.banner.textContent, hidden: ui.banner.hidden };
   let r;
   try {
-    r = await api.resolve(name, { preset: preset?.slug });
+    r = await api.resolve(name, { preset: preset?.slug, signal: lookup.signal });
+    if (lookup.signal.aborted) return;
   } catch (e) {
+    if (lookup.signal.aborted || e.name === "AbortError") return;
     if (e.code === "not_found") {
       showResult([["", `No object called “${name}” was found. Check the spelling, or use Coordinates.`]]);
-    } else if (preset && !isVerify()) {
+    } else if (preset && !strictFresh()) {
       r = { name: preset.label, ra: preset.ra, dec: preset.dec, source: "preset" };
     } else {
       showResult([["", `Name lookup is unavailable right now (${e.message}). Try again, or use Coordinates.`]]);
@@ -1562,7 +1712,7 @@ async function searchName(name, { band } = {}) {
   if (r.name) r.name = r.name.replace(/^NAME\s+/, "");
   // a test target found by name uses its baked position, so the saved observations apply exactly. Not in
   // ?fresh / ?verify: there the resolved position is used as returned (item 10).
-  const savedDemo = !!preset && !LIVE_ONLY;
+  const savedDemo = !!preset && !liveOnly();
   if (savedDemo) {
     const fromBake = r._provenance?.kind === "precomputed";
     r.name = preset.label;
@@ -1643,8 +1793,10 @@ function sliceLabel(i) {
   const lam = sky.lambdas?.[i];
   return `${channelName(i)} · ${lam ? lam.toFixed(3) + " µm" : ""}`;
 }
+const skyControls = () => [ui.skyDraw, ui.skyView, ui.skyBg, ui.skySlice];
 function ensureSky() {
   if (skyLoading) return skyLoading;
+  for (const c of skyControls()) c.disabled = true;   // usable once the map is there
   ui.skyMsg.hidden = false;
   ui.skyMsg.textContent = "Loading the SPHEREx sky map…";
   const t = state.target || PRESETS[0];
@@ -1654,11 +1806,14 @@ function ensureSky() {
       target: `${t.ra} ${t.dec}`, fov: 2, presets: PRESETS,
       onSelect: onSkySelect,
       onCursor: (c) => { ui.skyCursor.textContent = c ? `${fmtDeg(c.ra, c.dec)}  (${fmtSexa(c.ra, c.dec)})` : "–"; },
-      onPreset: (slug) => choosePreset(PRESETS.find((p) => p.slug === slug)),
+      // a test-target circle selects its field; "Compare this region" loads it
+      onPreset: (slug) => { const p = PRESETS.find((x) => x.slug === slug); if (p) sky?.select(p.ra, p.dec, fovValue()); },
       onView: ({ fov }) => { ui.skyView.textContent = `Use current view (${fov < 1 ? fov.toFixed(2) : fov.toFixed(1)}°)`; },
     });
     sky.setClickSide(fovValue());
     sky.onDrawArmed((on) => ui.skyDraw.setAttribute("aria-pressed", on));
+    for (const c of skyControls()) c.disabled = false;
+    ui.skyBg.closest("label").hidden = BACKGROUNDS.length < 2;
     setSlice(sliceForBand(ui.band.value));
     ui.skyMsg.hidden = true;
     syncSky();
@@ -1671,8 +1826,12 @@ function ensureSky() {
     const b = document.createElement("button");
     b.type = "button"; b.textContent = "Use coordinates instead";
     b.addEventListener("click", () => setMode("coords"));
+    const retry = document.createElement("button");
+    retry.type = "button"; retry.textContent = "Retry sky map";
+    retry.addEventListener("click", () => { $("sky").replaceChildren(); ensureSky(); });
     const box = document.createElement("div");
-    box.append(p, b);
+    box.className = "sky-msg-actions";
+    box.append(p, b, retry);
     ui.skyMsg.append(box);
   });
   return skyLoading;
@@ -1700,7 +1859,10 @@ async function onSkySelect({ ra, dec, side, clamped }) {
   if (Math.abs(side - fovValue()) > 1e-4) setFov(side);
   ui.skySel.textContent = `${fmtDeg(ra, dec)} · ${side.toFixed(3)}° box${clamped ? " (clamped to the 0.5° limit)" : ""}`;
   ui.skyCompare.disabled = false;
-  checkCoverage(ra, dec, side);
+  // a quick exposure lookup is free for the saved test targets; anywhere else it would start a slow archive
+  // search, so it is left to the comparison itself
+  if (nearestPreset(ra, dec) && !liveOnly()) checkCoverage(ra, dec, side);
+  else ui.skyCov.textContent = "Checked when you compare. A first search can take 1–10 minutes; the rest of the site stays usable.";
 }
 
 /** Quick look at what SPHEREx has here before starting a (possibly slow) frames job. */
@@ -1776,8 +1938,7 @@ ui.fastBlink.addEventListener("change", () => {
   }
   setSpeed();
 });
-ui.smooth.disabled = REDUCED_MOTION;
-if (REDUCED_MOTION) ui.smooth.closest("label").title = "Unavailable: your system asks for reduced motion.";
+if (REDUCED_MOTION) document.querySelector('[data-view="smooth"]').title = "Unavailable as motion: your system asks for reduced motion, so Smooth shows plain passes.";
 for (const c of [ui.stretch, ui.cmap, ui.clip, ui.showOverlay, ui.showEvents]) c.addEventListener("input", () => { render(); if (state.view === "colours" && c !== ui.showOverlay && c !== ui.showEvents) renderFilmstrip(); });
 ui.emptyPreset.addEventListener("click", () => choosePreset(PRESETS[0]));
 
@@ -1804,10 +1965,10 @@ document.addEventListener("keydown", (e) => {
   if (e.key === " " && !e.target.matches("button, a, summary")) { e.preventDefault(); ui.play.click(); }
   else if (e.key === "ArrowRight") player.step(1);
   else if (e.key === "ArrowLeft") player.step(-1);
-  else if (/^[1-5]$/.test(e.key) && state.frames) setView(VIEWS[+e.key - 1]);
+  else if (/^[1-7]$/.test(e.key) && ready()) setView(VIEWS[+e.key - 1]);
   else if ((e.key === "a" || e.key === "A") && passFrames().length > 1) setAB(state.index, state.b);
   else if ((e.key === "b" || e.key === "B") && passFrames().length > 1) setAB(state.a, state.index);
-  else if ((e.key === "d" || e.key === "D") && state.frames) setView(state.view === "diff" ? "blink" : "diff");
+  else if ((e.key === "d" || e.key === "D") && ready()) setView(state.view === "diff" ? "blink" : "diff");
   else if (e.key === "g" || e.key === "G") toggle(ui.showOverlay);
   else if (e.key === "m" || e.key === "M") toggle(ui.showEvents);
   else if ((e.key === "+" || e.key === "=") && state.frames) zoomTo(state.zoom > 1 ? { x: zoomCentre().x * state.frames.wcs.width, y: zoomCentre().y * state.frames.wcs.height } : null, state.zoom + 1);
@@ -1826,21 +1987,25 @@ function sizeStage() {
   const area = ui.stageArea;
   const cs = getComputedStyle(area);
   const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight), padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
-  const cbarW = getComputedStyle(ui.cbar).display === "none" || !state.frames ? 0 : 68;
+  const cbarW = getComputedStyle(ui.cbar).display === "none" || !ready() ? 0 : 68;
   const desktop = DESKTOP.matches && !document.body.classList.contains("embed");
   const w = area.clientWidth - padX - cbarW;
   const h = desktop ? area.clientHeight - padY : Math.max(280, innerHeight * 0.72);
-  let side = Math.floor(Math.max(160, Math.min(w, h)));
   // snap to a whole multiple of the image width when that is within 10 %, so pixels are even
   const img = state.view === "colours" && state.cube?.wcs ? state.cube.wcs.width : state.frames?.wcs?.width;
-  if (img) {
-    const k = Math.floor(side / img);
-    if (k >= 1 && side - k * img <= side * 0.1) side = k * img;
+  const snap = (side) => {
+    side = Math.floor(Math.max(120, side));
+    const k = img ? Math.floor(side / img) : 0;
+    return k >= 1 && side - k * img <= side * 0.1 ? k * img : side;
+  };
+  const side = snap(Math.min(w, h));
+  const pane = snap(Math.min((w - 8) / 2, h));   // Side by side: two squares across the same width
+  let changed = false;
+  if (ui.stage.style.width !== `${side}px`) { ui.stage.style.width = ui.stage.style.height = `${side}px`; changed = true; }
+  for (const p of ui.pairStage.querySelectorAll(".pair-pane")) {
+    if (p.style.width !== `${pane}px`) { p.style.width = p.style.height = `${pane}px`; changed = true; }
   }
-  if (ui.stage.clientWidth !== side) {
-    ui.stage.style.width = ui.stage.style.height = `${side}px`;
-    render();
-  }
+  if (changed) render();
 }
 new ResizeObserver(scheduleSize).observe(ui.stageArea);
 window.addEventListener("resize", scheduleSize);
@@ -1851,7 +2016,7 @@ function updateEmbedCaption() {
   const full = new URL(location.href); full.searchParams.delete("embed");
   const prov = provLabel(state.frames?._provenance).text;
   ui.embedCaption.hidden = false;
-  ui.embedCaption.replaceChildren(`${state.target?.label || ""} · ${ui.band.value} · ${prov} · `, el("a", { href: full.href, target: "_blank", rel: "noopener", text: "Open in SPHEREx Sky Explorer" }));
+  ui.embedCaption.replaceChildren(`${state.target?.label || ""} · ${ui.band.value} · ${prov} · `, el("a", { href: full.href, target: "_blank", rel: "noopener", text: "Open in Sphere Shift" }));
 }
 
 // ---- tour, field guide, help, glossary ----
@@ -1903,12 +2068,12 @@ ui.backendStatus.textContent = `Backend: ${apiLabel()}, checking…`;
 api.health().then((h) => {
   const switchHint = API_BASE === DEPLOYED_API ? "" : " (add ?api=default to switch back)";
   ui.backendStatus.textContent = h?.ok ? `Backend: ${apiLabel()}, answering${switchHint}`
-    : `Backend: ${apiLabel()}, not reachable. ${isVerify() ? "Verify mode: saved data is off, so nothing can load" : "The five test targets still work from saved data"}${switchHint}.`;
+    : `Backend: ${apiLabel()}, not reachable. ${strictFresh() ? "Verify mode: saved data is off, so nothing can load" : "The five test targets still work from saved data"}${switchHint}.`;
   ui.backendStatus.classList.toggle("ok", !!h?.ok);
   ui.backendStatus.classList.toggle("bad", !h?.ok);
   if (h?.release) ui.releaseTag.textContent = h.release.toUpperCase().replace("-", " ");
 });
-api.meta({ check: true }).then((m) => {
+api.meta().then((m) => {
   state.apiVersion = m?.api_version || null;
   if (state.apiVersion) ui.releaseTag.textContent = `${ui.releaseTag.textContent}${ui.releaseTag.textContent ? " · " : ""}API ${state.apiVersion}`;
   dataThrough = m?.index?.data_through || null;
@@ -1947,7 +2112,7 @@ if (hasCoords) {
 } else if (qp.get("name")) {
   ui.name.value = qp.get("name");
   ui.picker.hidden = true;
-  searchName(qp.get("name"));
+  searchName(qp.get("name"), { band: DETECTORS[qp.get("band")] ? qp.get("band") : undefined });
 } else if (qp.has("embed")) {
   choosePreset(PRESETS[0]);
 }

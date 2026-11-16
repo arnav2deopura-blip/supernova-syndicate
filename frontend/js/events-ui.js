@@ -100,7 +100,7 @@ export { download };
 export function eventReport(e, ctx) {
   const { target, frames, A, B, matched, band, passes, release, repro = [] } = ctx;
   return {
-    tool: "SPHEREx Sky Explorer", generated: new Date().toISOString(), release: release || null,
+    tool: "Sphere Shift", generated: new Date().toISOString(), release: release || null,
     reproducibility: Object.fromEntries(repro),
     status: e.kind === "candidate" || e.kind === "gaia_pm_mismatch" ? "candidate, not independently verified" : e.confidence === "low" ? "uncertain" : "measured",
     target: target && { label: target.label, ra: target.ra, dec: target.dec },

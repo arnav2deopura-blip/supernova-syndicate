@@ -159,6 +159,7 @@ class PreparedStamp:
     bw_um: float
     target_flags: list[str] = field(default_factory=list)
     masked_fraction: float = 0.0
+    target_in_frame: bool = True
     bkg_rms: float = float("nan")  # robust background noise, MJy/sr
     # For photometry / astrometry (items 4-5). Optional so hand-built stamps in tests stay valid.
     x0: int = 0                  # detector pixel of stamp pixel (0, 0): CUTX0 / CUTY0
@@ -174,6 +175,19 @@ class PreparedStamp:
     sc_pos_km: Optional[tuple[float, float, float]] = None  # X_SC/Y_SC/Z_SC, geocentric km
 
 
+def detector_xy(header, x, y):
+    """Native cutouts shift alternate-WCS CRPIX; S3 stamps record CUTX0/Y0."""
+    if 'CUTX0' in header and 'CUTY0' in header:
+        return float(header['CUTX0'])+x, float(header['CUTY0'])+y
+    if 'CRPIX1A' in header:
+        # Keep only alternate A cards: spatial SIP terms do not apply to active pixels.
+        keys=('WCSAXES','CTYPE','CUNIT','CRPIX','CRVAL','CDELT','PC','CD','CROTA')
+        alternate=fits.Header({key[:-1]:value for key,value in header.items()
+                               if key.endswith('A') and key.startswith(keys)})
+        return tuple(float(v) for v in WCS(alternate).all_pix2world(x,y,0))
+    return x,y
+
+
 def prepare_stamp(hdul: fits.HDUList, ra: float, dec: float, flag_policy: dict) -> Optional[PreparedStamp]:
     """Zodi-subtract, mask detector defects, remove residual background, tag wavelength.
 
@@ -185,8 +199,8 @@ def prepare_stamp(hdul: fits.HDUList, ra: float, dec: float, flag_policy: dict) 
     wcs = WCS(hdr)
     x, y = (float(v) for v in wcs.all_world2pix(ra, dec, 0))
     ny, nx = im.data.shape
-    if not (-0.5 <= x < nx - 0.5 and -0.5 <= y < ny - 0.5):
-        return None
+    inside = -0.5 <= x < nx-0.5 and -0.5 <= y < ny-0.5
+    if not inside and not np.isfinite(im.data).any(): return None
 
     bits = flag_bits(hdul["FLAGS"].header)
     flags = hdul["FLAGS"].data.astype(np.int64)
@@ -200,21 +214,24 @@ def prepare_stamp(hdul: fits.HDUList, ra: float, dec: float, flag_policy: dict) 
     variance = hdul["VARIANCE"].data.astype(np.float32)
     variance[~np.isfinite(image)] = np.nan
 
-    lam, bw = wavelength_at(hdul, x, y)
+    lam, bw = wavelength_at(hdul, x, y) if inside else (float("nan"),float("nan"))
     report = set(flag_policy["photometry_reject"]) | set(flag_policy["contamination"]) | set(flag_policy["display_mask"])
     epsf, os_, cwave = None, 5, float("nan")
     if "EPSF" in hdul:
         e = hdul["EPSF"]
-        epsf = np.asarray(e.data["EPSF"][0], float)
+        dx,dy=detector_xy(hdr,x,y)
+        row=int(np.argmin((e.data['XCENTER']-dx)**2+(e.data['YCENTER']-dy)**2)) if len(e.data)>1 else 0
+        epsf = np.asarray(e.data["EPSF"][row], float)
         os_ = int(e.header.get("OVSMPX", 5))
-        cwave = float(e.data["CWAVE"][0]) if "CWAVE" in e.data.columns.names else float("nan")
+        cwave = float(e.data["CWAVE"][row]) if "CWAVE" in e.data.columns.names else float("nan")
     sc = tuple(float(hdr[k]) for k in ("X_SC", "Y_SC", "Z_SC")) if all(k in hdr for k in ("X_SC", "Y_SC", "Z_SC")) else None
     return PreparedStamp(
         image=image, variance=variance, wcs=wcs, mjd=float(hdr["MJD-AVG"]), detector=int(hdr["DETECTOR"]),
         obs_id=str(hdr.get("OBSID", "")), x=x, y=y, lam_um=lam, bw_um=bw,
-        target_flags=[n for n in flags_near(flags, bits, x, y) if n in report],
+        target_flags=[n for n in flags_near(flags, bits, x, y) if n in report] if inside else [],
+        target_in_frame=inside,
         masked_fraction=float(np.mean(~np.isfinite(image))), bkg_rms=float(std),
-        x0=int(hdr.get("CUTX0", 0)), y0=int(hdr.get("CUTY0", 0)),
+        x0=int(round(detector_xy(hdr,0,0)[0])), y0=int(round(detector_xy(hdr,0,0)[1])),
         reject=(flags & mask_for(bits, flag_policy["photometry_reject"])) != 0,
         saturated=(flags & mask_for(bits, SATURATION_FLAGS)) != 0,
         suspect=(flags & mask_for(bits, SUSPECT_FLAGS)) != 0,

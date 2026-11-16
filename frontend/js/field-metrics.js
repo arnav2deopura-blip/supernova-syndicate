@@ -84,6 +84,7 @@ function element(tag, text, className) {
 }
 
 function addMetric(grid, label, value, explanation, kind = "Derived") {
+  if (value === 'Unknown' || value == null) return;
   const item = element("div", undefined, "science-metric");
   item.append(element("dt", label));
   item.append(element("dd", value ?? "Unknown"));
@@ -125,7 +126,7 @@ export function renderFieldMetrics(container, input = {}) {
     addMetric(grid, "Predicted target displacement", finite(d.predictedShift) ? `${fmt(d.predictedShift)}″` : "Unknown", "For the named field-centre target. Proper motion × epoch baseline / 1000 / 365.25. Linear prediction; parallax is excluded.");
   }
   container.append(grid);
-  container.append(element("p", "Check wavelength coverage, flags, registration, and repeat observations before interpreting a change. Reprojected neighbouring pixels are correlated; a pixel-noise ratio is not an integrated source detection. Unknown means the response did not provide a usable measurement.", "science-note"));
+  container.append(element("p", "Check wavelength coverage, flags, registration, and repeat observations before interpreting a change. Reprojected neighbouring pixels are correlated; a pixel-noise ratio is not an integrated source detection. Unavailable measurements are omitted. Click an image pixel for its readout; click a star for a spectrum when the service is available.", "science-note"));
   const references = element("p", "Methods and units: ", "science-note science-references");
   for (const [index, [label, url]] of [
     ["IRSA SPHEREx data products", "https://caltech-ipac.github.io/spherex-archive-documentation/spherex-data-products/"],

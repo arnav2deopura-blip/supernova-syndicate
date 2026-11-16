@@ -50,11 +50,13 @@ function build() {
 
 function target() {
   const s = steps[current];
+  if (!s) return null;
   const el = s.el && (typeof s.el === "function" ? s.el() : document.querySelector(s.el));
   return el && el.offsetParent !== null ? el : null;
 }
 
 function place() {
+  if (!root || root.hidden || current < 0 || !steps[current]) return;
   const spot = root.querySelector(".tour-spot"), pop = root.querySelector(".tour-pop");
   const el = target();
   const pad = 6;

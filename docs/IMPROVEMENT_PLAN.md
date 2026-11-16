@@ -1,3 +1,7 @@
+> Historical design plan. Current implemented behavior and acceptance evidence are tracked
+> in `RELEASE_READINESS.md` and `ACCEPTANCE_AUDIT.md`. Items below are development history,
+> not a promise that a third-party service is always available.
+
 # Improvement plan: make discoveries easy (recommendations, not built yet)
 
 **Status:** the frontend parts of §1–§7 are implemented (σ-change view with auto-markers and Events, any two passes, tour + glossary + field guide, channel ranges and molecule presets, Colours view, Advanced drawer, one notice component, timeline, save image/movie, embed mode). Still open: the backend `/api/changes` endpoint (§1 step 2; the browser detector in `frontend/js/changes.js` covers the frontend half), exposing exposure time / PSF FWHM / parallax errors (§4), CatWISE overlay, discovery feed. It builds on branch `c/search-modes` (the three search modes, async jobs).

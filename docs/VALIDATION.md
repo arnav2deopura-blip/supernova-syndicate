@@ -1,4 +1,9 @@
-# Validation — five test targets
+> Historical measurements below come from earlier pipeline runs. Exposure lists and processing
+> have since changed. These tables and figures are retained as development evidence, not a claim
+> that the current code reproduces every quoted uncertainty or significance. Current image-build
+> evidence is generated in `LIVE_VALIDATION.json`; release limits are in `RELEASE_READINESS.md`.
+
+# Historical science studies — five test targets
 
 Owner: B. Real SPHEREx DR1 + QR3 level-2 data, through the same pipeline the API serves. Positions come from CDS Sesame (SIMBAD) plus proper motion. Figure: `docs/img/presets_check.png` shows the first pass, the last pass, and last − first in noise units (matched-wavelength frames, asinh colour scale). Circles mark the proper-motion prediction at each pass's mean exposure time. All figures: `python scripts/make_figures.py` (see the Figures section at the end).
 
