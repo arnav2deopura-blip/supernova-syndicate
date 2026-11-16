@@ -24,7 +24,7 @@ Built by **Supernova Syndicate** for the 2026 NASA Space Apps Challenge (SPHEREx
 
 ## Three ways to pick a target
 
-All three end in the same comparison viewer (blink, difference, sum, Gaia overlay, click-for-spectrum):
+The first screen is a picker with the five test targets as example cards. The search box in the top bar takes a name or coordinates; the picker also has three tabs. All end in the same comparison viewer (blink, difference, sum, Gaia overlay, click-for-spectrum):
 
 | Mode | How | Backend |
 |---|---|---|
@@ -48,16 +48,29 @@ A single SPHEREx exposure isn't one colour: each detector sits behind a linear v
 
 - [x] Three search modes: explore the sky map, object name, RA/Dec
 - [x] Progress and cancel for slow first requests (async jobs)
-- [x] Play passes (blink) per detector band, play/pause/step, speed, a timeline of passes on a real time axis
+- [x] Instrument layout: the image takes every spare pixel; a wavelength ruler (D1–D6, 17 channels each) and a time ruler (each pass a block on a real date axis, exposures as ticks) carry the other two axes; corner readouts, scale bar, compass, colour bar with units, cursor position and pixel value
+- [x] Play passes (blink) per detector band, play/pause/step, speed up to 3 frames per second (faster only after a photosensitivity warning), optional 150 ms "Smooth" crossfade (off by default: a hard cut makes a mover jump)
 - [x] Difference and **Changes (σ)** between any two passes, from the calibrated noise maps; Sum
 - [x] **"What changed?" markers**: regions ≥ 5σ circled automatically (○ brighter/new, ✕ fainter/gone, → moved, ◐ variable; dashed = uncertain), merged with Gaia known movers, the `/api/movers` search and the `/api/lightcurve` verdict, listed as Events
 - [x] Per-event card: each pass at that spot with S/N, one-click "Is it new?" checks (SIMBAD, CatWISE, Gaia, IRSA Finder Chart, SkyBoT), JSON/CSV report
 - [x] Skippable guided tour (`?tour=1`, "?" button), "What am I looking at?" field guide, glossary ⓘ tooltips, plain-language controls
 - [x] 102 bands browsable: whole detector band, a channel range inside one detector, molecule presets (water ice, PAH/CH₄, CO₂ ice, CO), and a Colours view that plays through a band's 17 channels
-- [x] Advanced drawer: per-pass and per-exposure metadata, SPHEREx-only proper motion, photometry, derived physics (Unknown + reason when an input is missing), exports, citation
-- [x] Gaia DR3 overlay with proper-motion tracks; click for a spectrum
+- [x] Inspector with Events, Spectrum and Details tabs. Details: per-pass and per-exposure metadata ("No-data pixels %" is the share of pixels without data), SPHEREx-only proper motion, photometry stated in one band, derived physics (Unknown + reason when an input is missing; no colour temperature until its uncertainty is validated), exports, citation
+- [x] Gaia DR3 overlay with proper-motion tracks; click for a spectrum (drawn at screen resolution, axes in µm and µJy, error bars, a shape per pass, flagged points hollow)
+- [x] States stated: a provenance tag (Saved demo data / Server cache / Processed now / Mock), a comparison tag ("Matched at centre" or "Not matched"), a warning strip for saturated cores and incomplete data, the source of the target position in words, and hatching for pixels with no data
+- [x] Every channel of a requested range must be covered in every pass, or nothing is drawn and the user chooses; channel-range frames carry their own dates, exposure counts and observation IDs
+- [x] Robust client: every response is checked before use, slow jobs poll less often, a job with no progress for 2 minutes asks to keep waiting, retry or cancel, a job the server forgot is sent again once, a busy server is retried after its delay
+- [x] Exports carry a reproducibility header (URL, release, provenance, wavelengths, masking, warnings)
+- [x] Keyboard map (? in the app), visible focus, colour-vision-safe markers with a shape per kind, reduced motion respected
 - [x] Save image / movie, `?embed=1` bare player, reduced-motion respected, phone layout
-- [x] Shareable URLs: `?mode=&ra=&dec=&fov=&band=&matched=&name=&view=&a=&b=&ch=`
+- [x] Shareable URLs: `?mode=&ra=&dec=&fov=&band=&matched=&name=&view=&a=&b=&ch=`, keeping `api`, `fresh`, `verify`, `mock` and `embed`
+
+**Restored or deferred (decided 15 Nov 2026):**
+
+- Crossfade between passes: **restored** as the "Smooth" option, off by default, unavailable under reduced motion.
+- Side by side with linked zoom, pan and crosshair: **deferred**. Use Play passes or Difference.
+- Details split into Measure / Data / Export, a dark-centre diverging map for Changes (σ), and a light theme: **deferred**.
+- CatWISE overlay: **deferred**; the per-event checks link to CatWISE in VizieR.
 
 The change detector runs in the browser (`frontend/js/changes.js`); `node scripts/check_changes.mjs --inject` runs it on the five presets and checks that injected fake sources are recovered.
 
@@ -108,7 +121,7 @@ uvicorn backend.server:app --port 8000
 python -m http.server 5500 --directory frontend       # second terminal; open http://localhost:5500/?api=local
 ```
 
-**Which backend the page uses:** the footer says which one and whether it answers.
+**Which backend the page uses:** the status bar at the bottom says which one and whether it answers. A shared link keeps a non-default `?api=`.
 
 | URL option | Effect |
 |---|---|
@@ -116,12 +129,13 @@ python -m http.server 5500 --directory frontend       # second terminal; open ht
 | `?api=local` | A backend on this machine, port 8000 (remembered in this browser) |
 | `?api=https://…` | Any other backend (remembered) |
 | `?api=default` | Back to the deployed backend |
-| `?fresh=1` | Ask the backend even for the five test targets (normally they load from `frontend/precomputed/`, the same pipeline and release, so a demo never waits on a rebuild) |
+| `?fresh=1` | Ask the backend even for the five test targets (normally they load from `frontend/precomputed/`, the same pipeline and release, so a demo never waits on a rebuild); an outage may still fall back to saved data |
+| `?verify=1` | Prove the live path: saved data is never read and never used as a fallback; an outage is an error. Resolved name positions are used as returned |
 | `?mock=1` | Fake data from `frontend/mock/`, no backend (layout work only) |
 
 A position nobody has asked for yet takes ~1–10 min to build the first time (the page shows progress), then it is cached. The deployed backend scales to zero when idle and loses its cache, so the first request after a quiet spell is slower.
 
-**Tests:** `node --test frontend/tests/*.mjs` (frontend, Node 18+), `pytest` (backend), `node scripts/check_changes.mjs --inject` (change detector on the five presets).
+**Tests:** `node --test frontend/tests/*.mjs` (frontend, Node 18+), `pytest` (backend), `node scripts/check_changes.mjs --inject` (change detector on the five presets). CI runs all three.
 
 New SPHEREx release? A weekly GitHub Action opens an issue when one appears; then edit `backend/config.yaml`, rebuild the index and redeploy. No code changes (see [docs/DEPLOY.md](docs/DEPLOY.md#new-spherex-data)).
 
@@ -139,9 +153,11 @@ See [docs/VALIDATION.md](docs/VALIDATION.md) for results on all five test target
 
 Data credits and DOIs: [CITATION.md](CITATION.md). API: [docs/API.md](docs/API.md). Deploy: [docs/DEPLOY.md](docs/DEPLOY.md).
 
+Interface: icons from [Lucide](https://lucide.dev) (ISC licence); IBM Plex Sans and Mono (SIL OFL 1.1) when installed, otherwise system fonts; Okabe–Ito marker colours; cividis colour map. Sky map: Aladin Lite (CDS).
+
 ## AI use disclosure
 
-We used Anthropic's Claude to help plan the project and scaffold this repository. _TODO: list every AI tool used and how, before submission._
+We used Anthropic's Claude to help plan the project and scaffold this repository, and Claude Code to implement the frontend upgrade (layout, design tokens, robustness and labelling fixes, tests) from our written plan. No AI-generated images and no NASA branding are used. _TODO: list every other AI tool used and how, before submission._
 
 ## Team
 

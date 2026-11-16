@@ -31,6 +31,14 @@ Gaia Collaboration et al. (2023), *Gaia Data Release 3*, A&A 674, A1.
 - Aladin Lite (if used), CDS.
 - Astropy, astroquery, pyvo, reproject, photutils.
 
+## Interface
+
+- Icons: [Lucide](https://lucide.dev) (ISC licence), inline SVG, only the icons the interface uses.
+- Type: IBM Plex Sans and IBM Plex Mono ([SIL Open Font License 1.1](https://github.com/IBM/plex)) when installed on the
+  viewer's machine; otherwise the system interface and monospace fonts. No font files are bundled yet.
+- Colour-vision-safe marker colours: the Okabe–Ito palette. Colour map option: cividis (Nuñez, Anderton & Renslow 2018,
+  arXiv:1712.01662).
+
 ## Prior work we learned from
 
 - WiseView (ascl:1806.004), the blink tool used by Backyard Worlds.

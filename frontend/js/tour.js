@@ -2,6 +2,8 @@
 // Skip / ✕ on every step, Esc closes, ←/→ step. "Don't show again" lives in localStorage (try/catch).
 // The "?" button in the header restarts it; ?tour=1 deep-links to it.
 
+import { icon } from "./icons.js";
+
 const KEY = "sse.tourDone";
 export const tourDone = () => { try { return localStorage.getItem(KEY) === "1"; } catch { return false; } };
 const setDone = (v) => { try { v ? localStorage.setItem(KEY, "1") : localStorage.removeItem(KEY); } catch { /* storage blocked */ } };
@@ -14,7 +16,7 @@ function build() {
   root.innerHTML = `
     <div class="tour-spot" aria-hidden="true"></div>
     <div class="tour-pop" role="dialog" aria-modal="true" aria-labelledby="tour-title" tabindex="-1">
-      <button type="button" class="tour-x" aria-label="Close the tour">✕</button>
+      <button type="button" class="tour-x" aria-label="Close the tour">${icon("x")}</button>
       <p class="tour-count"></p>
       <h3 id="tour-title"></h3>
       <div class="tour-text"></div>

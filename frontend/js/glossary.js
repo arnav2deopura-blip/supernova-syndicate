@@ -1,4 +1,6 @@
-// Glossary tooltips: an ⓘ button next to a term, one plain-language sentence first, then the technical detail.
+import { icon } from "./icons.js";
+
+// Glossary tooltips: an (i) button next to a term, one plain-language sentence first, then the technical detail.
 // Markup: <button type="button" class="info" data-term="fov"></button>. Owner: C.
 
 export const GLOSSARY = {
@@ -11,16 +13,18 @@ export const GLOSSARY = {
   units: ["MJy/sr vs µJy", "MJy/sr is the brightness of each pixel (per patch of sky). µJy (micro-jansky) is the total light of one star, used in the spectrum."],
   pm: ["Proper motion", "How fast a star crawls across the sky, in arcseconds per year (″/yr) or milli-arcseconds per year (mas/yr). Barnard's Star moves 10″/yr, the fastest of any star."],
   sigma: ["σ (sigma) and S/N", "How sure we are a change is real: the change divided by the noise. 5σ means the change is 5 times bigger than the noise; random noise almost never does that."],
-  matched: ["Fair brightness comparison (matched wavelengths)", "Each pass sees a slightly different mix of colours. This setting keeps only the colours seen in every pass, so a star that looks brighter really is brighter. Costs some exposures."],
+  matched: ["Matched wavelengths (fair brightness comparison)", "Each pass sees a slightly different mix of colours. This setting keeps only the colours seen in every pass at the field centre, so a star there that looks brighter really is brighter. Near the edge the passes can still differ by up to about half a channel. Costs some exposures."],
   coadd: ["Co-add", "Several exposures of the same spot added together, so faint things stand out from the noise."],
-  diff: ["Difference image", "Pass B minus pass A. Things that did not change cancel to grey; brighter is red, fainter is blue."],
+  diff: ["Difference image", "Pass B minus pass A. Things that did not change cancel to white; brighter is red, fainter is blue."],
   changes: ["Changes (σ) view", "The difference divided by the noise, so the colour tells you how significant a change is. Regions above 5σ are circled automatically."],
   dipole: ["Dipole", "A blue spot right next to a red one in a difference image: the star was at the blue spot in pass A and at the red spot in pass B. That is what motion looks like."],
   flags: ["Flags", "Warnings the SPHEREx pipeline stores per pixel. OVERFLOW = saturated (too bright to measure), TRANSIENT = a cosmic ray or similar hit, GHOST/PERSIST = optical or detector echoes of a bright star."],
   gaia: ["Gaia", "ESA's space telescope that measured positions and motions of ~2 billion stars. If Gaia already knows a moving star, it is not a new discovery."],
   contrast: ["Contrast (stretch)", "How brightness maps to grey. ‘Show faint things’ (asinh) brings out faint stars; ‘Linear’ keeps brightness proportional."],
   cap: ["Brightness cap (clip %)", "Pixels brighter than this percentile are shown as pure white, so a few bright stars don't make everything else black."],
-  confidence: ["Confidence", "High: a clean change in empty sky with a fair comparison. Low (dashed): near a bright star, a data gap, or with mixed wavelengths. Check low-confidence events before believing them."],
+  confidence: ["Confidence", "High: a clean change in empty sky with matched wavelengths. Low (dashed): near a bright star, a data gap, far from the field centre, or with mixed wavelengths. Check low-confidence events before believing them."],
+  nodata: ["No data (hatched)", "Hatched pixels have no measurement: masked (saturated, a cosmic-ray hit) or outside every exposure. No data is not the same as dark sky."],
+  provenance: ["Where the data came from", "Saved demo data ships with this site. Server cache: the backend answered at once from earlier work. Processed now: the backend searched the archive and built this view for your request."],
 };
 
 let pop = null, owner = null;
@@ -63,7 +67,7 @@ export function initGlossary() {
   const decorate = (root) => root.querySelectorAll("button.info[data-term]").forEach((b) => {
     if (b.dataset.ready) return;
     b.dataset.ready = "1";
-    b.textContent = "i";
+    b.innerHTML = icon("info", 14);
     b.setAttribute("aria-label", `What is ${GLOSSARY[b.dataset.term]?.[0] || "this"}?`);
     b.setAttribute("aria-expanded", "false");
     b.setAttribute("aria-describedby", "gloss-pop");

@@ -2,14 +2,16 @@
 //   showNotice(el, { tone: "error"|"empty"|"warn"|"info", title, why, actions: [{label, onClick, primary}] })
 //   clearNotice(el)
 
-const ICON = { error: "!", empty: "○", warn: "⚠", info: "i" };
+import { iconEl } from "./icons.js";
+
+const ICON = { error: "alert", empty: "info", warn: "alert", info: "info" };
 
 export function showNotice(el, { tone = "info", title, why = "", actions = [] }) {
   el.hidden = false;
   el.className = `notice notice-${tone}`;
   el.setAttribute("role", tone === "error" ? "alert" : "status");
   const icon = document.createElement("span");
-  icon.className = "notice-icon"; icon.setAttribute("aria-hidden", "true"); icon.textContent = ICON[tone] || "i";
+  icon.className = "notice-icon"; icon.setAttribute("aria-hidden", "true"); icon.append(iconEl(ICON[tone] || "info"));
   const body = document.createElement("div");
   body.className = "notice-body";
   const t = document.createElement("strong"); t.textContent = title;
@@ -46,9 +48,19 @@ export const NOTICES = {
     tone: "warn", title: "Too bright: the target's core is saturated (OVERFLOW).",
     why: `In ${band} the centre of this star overflows the detector, so its brightness and position there are less precise and its leftovers can look like changes. A redder band (higher D number) is often not saturated.`,
   }),
-  backendDown: (msg) => ({
+  backendDown: (msg, verify = false) => ({
     tone: "error", title: "The SPHEREx backend could not be reached.",
-    why: `${msg ? `(${msg}) ` : ""}Precomputed data exists only for the five test targets. Try again in a moment, or pick a test target.`,
+    why: verify
+      ? `${msg ? `(${msg}) ` : ""}Verify mode (?verify=1) never shows saved data, so there is no image. Retry, or remove ?verify=1 to allow saved test-target data.`
+      : `${msg ? `(${msg}) ` : ""}Precomputed data exists only for the five test targets. Try again in a moment, or pick a test target.`,
+  }),
+  badResponse: (msg) => ({
+    tone: "error", title: "The service returned data this page cannot read.",
+    why: `${msg ? `(${msg}) ` : ""}Nothing is drawn from it. This is usually a server-side fault or a version mismatch; retrying can help.`,
+  }),
+  stalled: () => ({
+    tone: "warn", title: "No progress for 2 minutes.",
+    why: "The server has not reported any progress on this request. It may still be downloading a large set of files, or it may be stuck.",
   }),
   noNoise: () => ({
     tone: "empty", title: "Noise maps aren't available for this view.",

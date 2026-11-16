@@ -6,9 +6,17 @@ const CMAPS = {
   gray: [[0, 0, 0], [255, 255, 255]],
   inferno: [[0, 0, 4], [87, 16, 110], [188, 55, 84], [249, 142, 9], [252, 255, 164]],
   viridis: [[68, 1, 84], [59, 82, 139], [33, 145, 140], [94, 201, 98], [253, 231, 37]],
+  // cividis (Nuñez et al. 2018), built for colour-vision deficiency; 5-stop approximation
+  cividis: [[0, 32, 77], [65, 77, 107], [124, 123, 120], [188, 175, 111], [254, 232, 56]],
   // Diverging map for difference images: blue = fainter, red = brighter (also readable with red-green colour blindness).
   diverging: [[33, 102, 172], [247, 247, 247], [178, 24, 43]],
 };
+
+/** CSS linear-gradient stops for a colour bar (bottom = low, top = high when used with "to top"). */
+export function gradientCSS(name, diverging = false) {
+  const stops = CMAPS[diverging ? "diverging" : name] || CMAPS.gray;
+  return stops.map((c, i) => `rgb(${c.join(",")}) ${Math.round((i / (stops.length - 1)) * 100)}%`).join(", ");
+}
 
 function lut(name) {
   const stops = CMAPS[name] || CMAPS.gray;
@@ -44,6 +52,8 @@ export function sumFrames(frames) {
 /**
  * Draw a flat float array to the canvas.
  * Limits come from `limitsFrom` (all frames) so brightness changes between epochs stay visible.
+ * Masked pixels (null) are left transparent, so the stage's no-data hatch shows through.
+ * Returns the display limits {lo, hi} for the colour bar.
  */
 export function draw(canvas, data, width, height, { stretch = "asinh", cmap = "gray", clip = 99.5, limitsFrom = data, diverging = false, range = null } = {}) {
   canvas.width = width;
@@ -80,4 +90,5 @@ export function draw(canvas, data, width, height, { stretch = "asinh", cmap = "g
     img.data[o + 3] = 255;
   }
   ctx.putImageData(img, 0, 0);
+  return { lo, hi, stretch: diverging ? "linear" : stretch };
 }
