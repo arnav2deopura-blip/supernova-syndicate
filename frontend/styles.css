@@ -426,6 +426,7 @@ button.play { width: 40px; }
 .picker-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .picker-head h2 { font-size: 16px; line-height: 24px; }
 .picker > .k { margin: 0; }
+.picker-lede { margin: -8px 0 0; color: var(--ink-1); font-size: 14px; line-height: 20px; }
 .offer { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 8px 12px; border: 1px solid var(--line-2); border-radius: var(--r-pop); background: var(--bg-1); }
 .offer span { flex: 1 1 260px; color: var(--ink-2); }
 .examples { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 8px; }
@@ -471,6 +472,7 @@ button.play { width: 40px; }
 
 .events-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
 .events-head h2 { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
+.events-head label.check > span { display: inline; }
 .events { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 0; border-top: 1px solid var(--line-1); }
 .events li { border-bottom: 1px solid var(--line-1); }
 .events li button {

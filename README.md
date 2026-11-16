@@ -4,7 +4,25 @@
 
 Built by **Sphere Shift** for the 2026 NASA Space Apps Challenge (SPHEREx / Planet X challenge).
 
-> Status: under construction during the hackathon (14–15 Nov 2026).
+> Status: live. Built and submitted during the hackathon (14–15 Nov 2026).
+
+![Barnard's Star moving across three SPHEREx passes](docs/img/barnard_blink.gif)
+
+## How it answers the challenge
+
+| The challenge asks for | Sphere Shift |
+|---|---|
+| A public web tool; enter RA and Dec; see the images "like a little video" | Coordinates, object name or a box on the sky map, then a blink of every SPHEREx pass, with play, step and speed |
+| Tested on Barnard's Star, ε Indi B, WISE 0855, RW Aur, R Dra | All five are one click from the first screen, with saved copies so they open at once |
+| Easy to update with new data releases | Releases live in `backend/config.yaml`; a weekly GitHub Action reports new ones |
+| Use the 102 bands; add each detector's data together | One co-add per pass and detector; channel ranges, molecule presets and a Colours view inside a band |
+| Spectra on the fly | Click any star for its spectrum |
+| Add or subtract images from different times | Sum, Difference and Changes (σ) views, with changes above 5σ circled |
+| Choose the field of view | 0.04° to 0.5° |
+| Overlay data from other telescopes | Gaia DR3 positions and proper-motion tracks; one-click SIMBAD, CatWISE and asteroid checks |
+| Coordinates in the URL, for embedding | Every view has a shareable URL; `?embed=1` gives a bare player |
+| Show metadata such as contamination flags | Per-pass flags, exposure counts, no-data shading and saturation warnings |
+| Use tools like Astropy and Aladin | Astropy, reproject and photutils in the backend; Aladin Lite for the sky map |
 
 ## Live demo
 
@@ -16,11 +34,11 @@ Built by **Sphere Shift** for the 2026 NASA Space Apps Challenge (SPHEREx / Plan
 
 | Target | What to look for | Link |
 |---|---|---|
-| Barnard's Star | Fast mover, dipole in difference mode | `?name=Barnard%27s+Star&band=D2` |
-| Epsilon Indi B | Faint mover near a bright star | `?name=eps+Indi+B&band=D3` |
-| WISE 0855-0714 | Very faint, very red mover (D6 only) | `?name=WISE+J085510.83-071442.5&band=D6` |
-| RW Aurigae | Irregular variable | `?name=RW+Aur&band=D2` |
-| R Draconis | Mira variable, light curve | `?name=R+Dra&band=D2` |
+| Barnard's Star | Fast mover, dipole in difference mode | [open](https://arnav2deopura-blip.github.io/supernova-syndicate/?name=Barnard%27s+Star&band=D2) |
+| Epsilon Indi B | Faint mover near a bright star | [open](https://arnav2deopura-blip.github.io/supernova-syndicate/?name=eps+Indi+B&band=D3) |
+| WISE 0855-0714 | Very faint, very red mover (D6 only) | [open](https://arnav2deopura-blip.github.io/supernova-syndicate/?name=WISE+J085510.83-071442.5&band=D6) |
+| RW Aurigae | Irregular variable | [open](https://arnav2deopura-blip.github.io/supernova-syndicate/?name=RW+Aur&band=D2) |
+| R Draconis | Mira variable; it saturates D2, and the tool says so | [open](https://arnav2deopura-blip.github.io/supernova-syndicate/?name=R+Dra&band=D2) |
 
 ## Three ways to pick a target
 
@@ -159,12 +177,6 @@ Interface: icons from [Lucide](https://lucide.dev) (ISC licence); IBM Plex Sans 
 
 Anthropic Claude helped plan the project and scaffold the repository, and Claude Code implemented the frontend redesign (layout, design tokens, wavelength and time rulers, honesty labels, client robustness, tests) from our written plan. OpenAI Codex assisted with frontend implementation, backend reliability fixes, scientific guardrails, documentation, and automated/manual browser audits. AI-generated changes are checked by the repository suites; this does not independently validate every scientific inference. No AI-generated images and no NASA branding are used.
 
-## Team
-
-Sphere Shift: **Chakshu Parnam, Arnav Deopura, and Mohammed Zaid Khan**.
-
-Licence: MIT.
-
 ### Browser acceptance checks
 
 The final interaction audit and its limits are recorded in
@@ -197,3 +209,9 @@ Dense fields can exceed the per-job image budget even below the maximum FOV. The
 service checks this before downloading cutouts and offers a smaller field; it does
 not attempt an unbounded allocation. Research fits combining detectors have the same
 working-set limit.
+
+## Team
+
+Sphere Shift: **Chakshu Parnam, Arnav Deopura, and Mohammed Zaid Khan**.
+
+Licence: MIT.
