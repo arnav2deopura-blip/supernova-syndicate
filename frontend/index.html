@@ -5,115 +5,102 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sphere Shift</title>
   <meta name="description" content="Blink SPHEREx infrared sky passes to find stars that move, appear, disappear or change brightness.">
+  <meta name="color-scheme" content="dark">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <a class="skip-link" href="#viewer">Skip to the viewer</a>
-  <header class="top">
-    <div>
-      <p class="mission-kicker">SPHERE SHIFT / SKY OBSERVATORY</p>
+
+  <!-- A · top bar -->
+  <header class="topbar" id="topbar">
+    <a class="brand" href="./" title="Start over">
+      <svg class="glyph" viewBox="0 0 32 24" width="28" height="21" aria-hidden="true" focusable="false">
+        <circle cx="12" cy="12" r="7.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <circle cx="20" cy="12" r="7.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.2 2.2"/>
+      </svg>
       <h1>Sphere Shift</h1>
-      <p class="tagline">Find what moved, appeared or changed between SPHEREx passes of the infrared sky</p>
-    </div>
+      <span class="brand-sub">SPHEREx sky explorer</span>
+    </a>
+    <form class="top-search" id="top-search" role="search" novalidate>
+      <label class="visually-hidden" for="q">Object name or coordinates</label>
+      <span class="field">
+        <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input id="q" list="name-suggest" placeholder="Name or coordinates · Barnard's Star · 269.446 +4.771" autocomplete="off" spellcheck="false" aria-describedby="q-echo" title="Focus with /">
+      </span>
+      <p id="q-echo" class="q-echo" aria-live="polite"></p>
+    </form>
+    <button type="button" id="sky-btn" title="Pick a region on the all-sky map">
+      <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z"/><path d="M15 5.764v15"/><path d="M9 3.236v15"/></svg>
+      <span>Sky map</span>
+    </button>
+    <span id="new-data" class="badge badge-new" hidden></span>
     <div class="top-actions">
-      <span id="new-data" class="badge badge-new" hidden></span>
-      <button type="button" id="guide-btn">What am I looking at?</button>
-      <button type="button" id="tour-btn" class="round" aria-label="Start the guided tour" title="Guided tour">?</button>
+      <button type="button" id="guide-btn" title="Real and fake changes, with examples">Field guide</button>
+      <button type="button" id="tour-btn" title="Guided tour (1 minute)" aria-label="Start the guided tour">Tour</button>
+      <button type="button" id="help-btn" class="icon-btn" aria-label="Help and keyboard shortcuts" title="Help and shortcuts (?)">
+        <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+      </button>
     </div>
   </header>
 
-  <div id="tour-offer" class="offer" role="region" aria-label="Tour offer" hidden>
-    <span>New here? A 1-minute tour shows how to spot a moving star.</span>
-    <button type="button" class="primary" id="tour-offer-yes">Take the tour</button>
-    <button type="button" id="tour-offer-no">No thanks</button>
-  </div>
-
   <div id="banner" class="banner" role="status" hidden></div>
 
-  <main>
-    <section class="controls" aria-label="Choose a target">
-      <div class="search-summary" id="search-summary" hidden>
-        <span id="search-summary-text"></span>
-        <button type="button" id="search-expand">Change target</button>
-      </div>
-      <div id="search-body">
-      <div class="tabs" role="tablist" aria-label="Search mode">
-        <button type="button" role="tab" id="tab-explore" data-mode="explore" aria-controls="panel-explore">Explore the sky</button>
-        <button type="button" role="tab" id="tab-name" data-mode="name" aria-controls="panel-name">Object name</button>
-        <button type="button" role="tab" id="tab-coords" data-mode="coords" aria-controls="panel-coords">Coordinates</button>
-      </div>
-
-      <!-- Mode 1: free exploration on an all-sky map -->
-      <div class="panel" id="panel-explore" role="tabpanel" aria-labelledby="tab-explore" hidden>
-        <div class="sky-wrap" id="sky-wrap">
-          <div id="sky"></div>
-          <div class="sky-msg" id="sky-msg" hidden></div>
+  <main class="shell" id="shell">
+    <!-- B · context bar: target, field of view, wavelengths, provenance, comparison -->
+    <section class="context" id="context" aria-label="Target and wavelengths">
+      <div class="ctx-row ctx-id">
+        <h2 id="target-label">No target yet</h2>
+        <div class="search-summary" id="search-summary" hidden>
+          <span id="search-summary-text"></span>
+          <button type="button" id="search-expand" class="link">Change target</button>
         </div>
-        <div class="sky-tools">
-          <label>Background <select id="sky-bg"></select></label>
-          <label class="slice">Wavelength <span class="slice-row"><input id="sky-slice" type="range" min="1" max="101" value="25"> <output id="sky-slice-label">–</output></span></label>
-          <button type="button" id="sky-draw" disabled aria-pressed="false">Draw box</button>
-          <button type="button" id="sky-view" disabled>Use current view</button>
-        </div>
-        <p class="hint">Drag to pan, scroll or pinch to zoom. <b>Click</b> to drop a box of the chosen field of view, or <b>Shift+drag</b> (or “Draw box”, then drag) to draw one, up to 0.5°. Orange circles select known targets. After selecting a box, press “Compare this region” to load its dated observations below.</p>
-        <div class="selection" id="sky-selection">
-          <div><span class="k">Cursor</span> <span id="sky-cursor">–</span></div>
-          <div><span class="k">Selection</span> <span id="sky-sel">none yet</span></div>
-          <div><span class="k">Coverage</span> <span id="sky-cov">–</span></div>
-          <button type="button" id="sky-compare" class="primary" disabled>Compare this region</button>
-        </div>
-      </div>
-
-      <!-- Mode 2: object name -->
-      <form class="panel" id="panel-name" role="tabpanel" aria-labelledby="tab-name" hidden>
-        <div class="row">
-          <label class="grow">Object name
-            <input id="name" list="name-suggest" placeholder="Barnard's Star, RW Aur, M42, HD 189733…" autocomplete="off" required>
+        <button type="button" id="show-on-sky" class="link" hidden>Show on sky map</button>
+        <span class="grow"></span>
+        <div class="fov-ctl">
+          <span class="k" id="fov-k">Field <button type="button" class="info" data-term="fov"></button></span>
+          <div class="seg seg-fov" id="fov-seg" role="radiogroup" aria-labelledby="fov-k" hidden></div>
+          <label class="native-fov"><span class="visually-hidden">Field of view</span>
+            <select id="fov">
+              <option value="0.04">0.04°</option>
+              <option value="0.1" selected>0.1°</option>
+              <option value="0.25">0.25°</option>
+              <option value="0.5">0.5°</option>
+            </select>
           </label>
-          <datalist id="name-suggest"></datalist>
-          <button type="submit" class="primary">Search &amp; compare</button>
         </div>
-        <div class="result" id="name-result" hidden></div>
-        <div class="presets" id="presets" aria-label="Test targets"><span class="k">Try one:</span></div>
-      </form>
-
-      <!-- Mode 3: coordinates -->
-      <form class="panel" id="panel-coords" role="tabpanel" aria-labelledby="tab-coords" hidden novalidate>
-        <div class="row">
-          <label><span>RA <button type="button" class="info" data-term="radec"></button></span><input id="ra" placeholder="269.4461 or 17:57:47.1" autocomplete="off" inputmode="decimal"></label>
-          <label>Dec <input id="dec" placeholder="4.7707 or +04:46:14" autocomplete="off" inputmode="decimal"></label>
-          <button type="submit" class="primary">Compare</button>
-        </div>
-        <p class="hint">ICRS. Decimal degrees, or sexagesimal (RA in hours: <code>17:57:47</code> / <code>17h57m47s</code>). You can also paste both into the RA box: <code>269.446 4.771</code>.</p>
-        <p class="echo" id="coord-echo" aria-live="polite"></p>
-      </form>
       </div>
-
-      <!-- Shared by all modes -->
-      <div class="shared" id="shared">
-        <label class="check" title="Require the backend; saved test-target observations will not be substituted"><input id="live-only" type="checkbox"> Backend only</label>
-        <label><span>Field of view <button type="button" class="info" data-term="fov"></button></span>
-          <select id="fov">
-            <option value="0.04">0.04°</option>
-            <option value="0.1" selected>0.1°</option>
-            <option value="0.25">0.25°</option>
-            <option value="0.5">0.5°</option>
-          </select>
-        </label>
-        <label><span>Colour band <button type="button" class="info" data-term="band"></button></span>
+      <div class="ctx-row ctx-wl" id="shared">
+        <span class="k" id="band-k">λ <button type="button" class="info" data-term="band"></button></span>
+        <div class="wl-ruler" id="wl-ruler" hidden></div>
+        <label class="native-band"><span class="visually-hidden">Detector band</span>
           <select id="band">
             <option value="D1">D1 · 0.75–1.1 µm</option><option value="D2" selected>D2 · 1.1–1.6 µm</option>
             <option value="D3">D3 · 1.6–2.4 µm</option><option value="D4">D4 · 2.4–3.8 µm</option>
             <option value="D5">D5 · 3.8–4.4 µm</option><option value="D6">D6 · 4.4–5.0 µm</option>
           </select>
         </label>
-        <label class="check" title="Matched wavelengths: use only the spectral channels seen in every pass"><input id="matched" type="checkbox" checked> Match wavelengths at centre <button type="button" class="info" data-term="matched"></button></label>
         <div class="wl" id="wl">
-          <span class="k">Wavelengths <button type="button" class="info" data-term="channel"></button></span>
           <div class="seg" role="radiogroup" aria-label="Wavelengths to use">
-            <button type="button" role="radio" data-wl="detector" aria-checked="true">Whole band (clearest)</button>
-            <button type="button" role="radio" data-wl="range" aria-checked="false">Pick channels</button>
+            <button type="button" role="radio" data-wl="detector" aria-checked="true" title="All 17 channels of the detector: the clearest picture">Whole band</button>
+            <button type="button" role="radio" data-wl="range" aria-checked="false" title="A few channels, e.g. to look for a molecule">Pick channels</button>
           </div>
+          <button type="button" class="info" data-term="channel"></button>
+        </div>
+        <span class="wl-label" id="wl-label"></span>
+        <span class="grow"></span>
+        <div class="tags badges" id="badges">
+          <details class="tag-pop" id="prov-pop" hidden>
+            <summary class="tag" id="prov-tag">–</summary>
+            <div class="pop" id="prov-body"></div>
+          </details>
+          <details class="tag-pop" id="cmp-pop" hidden>
+            <summary class="tag" id="cmp-tag">Matched at centre</summary>
+            <div class="pop">
+              <label class="check" title="Matched wavelengths: use only the spectral channels seen in every pass"><input id="matched" type="checkbox" checked> Match wavelengths at centre <button type="button" class="info" data-term="matched"></button></label>
+              <p id="cmp-body">Wavelengths are matched at the field centre. Sources near the edge can differ by up to about half a channel. Confirm an off-centre brightness change with its spectrum.</p>
+            </div>
+          </details>
+          <span id="badge-extra"></span>
         </div>
       </div>
       <div class="range-box" id="range-box" hidden>
@@ -121,146 +108,319 @@
           <label>From channel <input id="ch-lo" type="range" min="1" max="17" value="7"></label>
           <label>to <input id="ch-hi" type="range" min="1" max="17" value="11"></label>
           <output id="ch-label">–</output>
-          <button type="button" id="ch-apply" class="primary">Show these channels</button>
+          <button type="button" id="ch-apply" class="primary" title="Fewer channels = fewer exposures = noisier. Every chosen channel must be seen in every pass.">Apply</button>
         </div>
-        <p class="hint">Fewer channels = fewer exposures = noisier. Channels stay inside one detector, so the picture never mixes two instruments.</p>
-        <div class="molecules" id="molecules"><span class="k">Molecules:</span></div>
-      </div>
-
-      <div class="progress" id="progress" hidden>
-        <progress id="progress-bar"></progress>
-        <span id="progress-text">Working…</span>
-        <button type="button" id="progress-cancel">Cancel</button>
+        <p class="hint">Fewer channels = fewer exposures = noisier. Every chosen channel must be seen in every pass. Channels stay inside one detector, so the picture never mixes two instruments.</p>
+        <div class="molecules" id="molecules"><span class="k">Molecules</span></div>
       </div>
     </section>
 
+    <!-- C, D, F · views, stage, time dock -->
     <section class="viewer" id="viewer" aria-label="Viewer" tabindex="-1">
-      <div class="viewer-head">
-        <h2 id="target-label">No target yet</h2>
-        <span class="badges" id="badges"></span>
-        <button type="button" id="show-on-sky" class="link" hidden>Show on sky map</button>
-      </div>
-
-      <div class="seg views" role="radiogroup" aria-label="What to show" id="views">
-        <button type="button" role="radio" data-view="blink" aria-checked="true" title="Blink: play the passes as a movie">Play passes</button>
-        <button type="button" role="radio" data-view="smooth" aria-checked="false" title="Visual crossfade; blended moments are not observations">Smooth</button>
-        <button type="button" role="radio" data-view="pair" aria-checked="false" title="Two passes with shared sky placement, stretch and zoom">Side by side</button>
-        <button type="button" role="radio" data-view="diff" aria-checked="false">Difference</button>
-        <button type="button" role="radio" data-view="changes" aria-checked="false">Changes (σ)</button>
-        <button type="button" role="radio" data-view="sum" aria-checked="false" title="All passes added: faintest things">Sum</button>
-        <button type="button" role="radio" data-view="colours" aria-checked="false" title="Play through the channels of this band instead of through time">Colours</button>
+      <div class="viewbar" id="viewbar">
+        <div class="seg views" role="radiogroup" aria-label="What to show" id="views">
+          <button type="button" role="radio" data-view="blink" aria-checked="true" title="Blink: play the passes as a movie, a hard cut between real observations (1)">Play passes</button>
+          <button type="button" role="radio" data-view="smooth" aria-checked="false" title="Crossfade between passes. The blended moments are a visual transition, not observations (2)">Smooth</button>
+          <button type="button" role="radio" data-view="pair" aria-checked="false" title="Passes A and B next to each other, with shared placement, stretch and zoom (3)">Side by side</button>
+          <button type="button" role="radio" data-view="diff" aria-checked="false" title="Difference image: pass B − pass A (4)">Difference</button>
+          <button type="button" role="radio" data-view="changes" aria-checked="false" title="Significance map: (B − A) / noise, changes above 5σ circled (5)">Changes (σ)</button>
+          <button type="button" role="radio" data-view="sum" aria-checked="false" title="Co-add of all passes: the faintest things (6)">Sum</button>
+          <button type="button" role="radio" data-view="colours" aria-checked="false" title="Play through the 17 channels of this band instead of through time (7)">Colours</button>
+        </div>
         <button type="button" class="info" data-term="diff"></button>
+        <span class="grow"></span>
+        <label class="zoom-ctl" title="Zoom (+ / −, or double-click the image)"><span class="zoom-word">Zoom</span>
+          <select id="zoom" aria-label="Zoom"><option value="1">1×</option><option value="2">2×</option><option value="3">3×</option><option value="4">4×</option></select>
+        </label>
+        <details class="display-opts pop-wrap" id="display-opts">
+          <summary class="btn" title="Contrast, colours, zoom and overlays">
+            <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></svg>
+            Display
+          </summary>
+          <div class="pop">
+            <label><span>Contrast <button type="button" class="info" data-term="contrast"></button></span>
+              <select id="stretch">
+                <option value="asinh">Show faint things (asinh)</option>
+                <option value="linear">Linear</option>
+              </select>
+            </label>
+            <label>Colour map
+              <select id="cmap">
+                <option value="gray">Grey</option>
+                <option value="cividis">Cividis (colour-vision safe)</option>
+                <option value="inferno">Inferno</option>
+                <option value="viridis">Viridis</option>
+              </select>
+            </label>
+            <label><span>Brightness cap <button type="button" class="info" data-term="cap"></button></span> <input id="clip" type="range" min="90" max="100" step="0.1" value="99.5"></label>
+            <label class="check"><input id="show-overlay" type="checkbox" checked> Gaia stars <kbd>G</kbd> <button type="button" class="info" data-term="gaia"></button></label>
+            <label class="check"><input id="show-events" type="checkbox" checked> Change markers <kbd>M</kbd></label>
+            <label class="check" title="Allows blink speeds above 3 frames per second"><input id="fast-blink" type="checkbox"> Fast blink (up to 10 fps)</label>
+          </div>
+        </details>
+        <button type="button" id="save-png" title="Download the current view as PNG">Save image</button>
+        <button type="button" id="save-movie" title="Download the blink as a video">Save movie</button>
       </div>
 
       <div class="ab" id="ab" hidden>
-        <label>Pass A <select id="pass-a"></select></label>
+        <label>Pass <b class="ab-letter">A</b> <select id="pass-a"></select></label>
         <span aria-hidden="true">→</span>
-        <label>Pass B <select id="pass-b"></select></label>
+        <label>Pass <b class="ab-letter">B</b> <select id="pass-b"></select></label>
         <span class="k" id="ab-hint"></span>
         <label title="How big a brightness change on a star counts. Careful: changes must exceed 10 % of the star's brightness as well as 5σ. Sensitive: 5 % (more real variables, more false alarms).">Sensitivity
           <select id="sensitivity"><option value="0.1">Careful</option><option value="0.05">Sensitive</option></select>
         </label>
       </div>
 
+      <div id="warn-strip" class="warn-strip" role="status" hidden></div>
       <div id="viewer-notice" class="notice" hidden></div>
 
-      <div class="pair-stage" id="pair-stage" hidden>
-        <div class="pair-pane"><div class="pair-inner"><canvas id="pair-a" aria-label="Pass A image; click to measure a spectrum"></canvas><canvas id="pair-overlay-a" aria-hidden="true"></canvas></div><span id="pair-label-a"></span></div>
-        <div class="pair-pane"><div class="pair-inner"><canvas id="pair-b" aria-label="Pass B image; click to measure a spectrum"></canvas><canvas id="pair-overlay-b" aria-hidden="true"></canvas></div><span id="pair-label-b"></span></div>
-      </div>
-      <div class="stage" id="stage">
-        <div class="stage-inner" id="stage-inner">
-          <canvas id="image" width="48" height="48" aria-label="SPHEREx image. Click a star to measure its spectrum."></canvas>
-          <canvas id="transition" aria-hidden="true"></canvas>
-          <canvas id="overlay" aria-hidden="true"></canvas>
+      <div class="stage-area" id="stage-area">
+        <div class="stage-row">
+          <div class="stage" id="stage">
+            <div class="stage-inner" id="stage-inner">
+              <canvas id="image" width="48" height="48" aria-label="SPHEREx image. Click a star to measure its spectrum."></canvas>
+              <canvas id="image-prev" width="48" height="48" aria-hidden="true"></canvas>
+              <canvas id="overlay" aria-hidden="true"></canvas>
+            </div>
+            <canvas id="reticle" aria-hidden="true"></canvas>
+            <span class="corner tl" id="corner-tl" hidden></span>
+            <span class="corner tr" id="corner-tr" hidden></span>
+            <span class="corner bl" id="corner-bl" hidden><i class="scalebar" id="scalebar"></i><b id="scalebar-label"></b></span>
+            <span class="corner br" id="corner-br" hidden title="North up, east left">
+              <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true" focusable="false"><path d="M26 26V6M26 26H6" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M23 9l3-4 3 4M9 23l-4 3 4 3" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+              <b class="cn">N</b><b class="ce">E</b>
+            </span>
+            <div class="stage-empty" id="stage-empty"><p id="stage-empty-pick">No image yet. Pick a target, or try <button type="button" class="link" id="empty-preset">Barnard's Star</button>.</p><p id="stage-empty-msg" hidden>No image. The message above says why, and what you can do.</p></div>
+            <div class="progress" id="progress" hidden>
+              <p class="progress-title" id="progress-title">Working</p>
+              <progress id="progress-bar"></progress>
+              <p id="progress-text">Working…</p>
+              <p class="hint" id="progress-hint">A new position usually takes 1 to 10 minutes; after that it is cached.</p>
+              <div class="progress-actions">
+                <button type="button" id="progress-wait" class="primary" hidden>Keep waiting</button>
+                <button type="button" id="progress-retry" hidden>Retry</button>
+                <button type="button" id="progress-cancel">Cancel</button>
+              </div>
+            </div>
+          </div>
+          <div class="pair-stage" id="pair-stage" hidden>
+            <div class="pair-pane"><div class="pair-inner"><canvas id="pair-a" aria-label="Pass A image; click to measure a spectrum"></canvas><canvas id="pair-overlay-a" aria-hidden="true"></canvas></div><span class="corner tl" id="pair-label-a"></span></div>
+            <div class="pair-pane"><div class="pair-inner"><canvas id="pair-b" aria-label="Pass B image; click to measure a spectrum"></canvas><canvas id="pair-overlay-b" aria-hidden="true"></canvas></div><span class="corner tl" id="pair-label-b"></span></div>
+          </div>
+          <div class="cbar" id="cbar" hidden>
+            <span class="cbar-v" id="cbar-hi"></span>
+            <i class="cbar-ramp" id="cbar-ramp"></i>
+            <span class="cbar-v" id="cbar-lo"></span>
+            <span class="cbar-u" id="cbar-unit"></span>
+          </div>
         </div>
-        <div class="stage-empty" id="stage-empty"><p>Pick a target above, or try <button type="button" class="link" id="empty-preset">Barnard's Star</button>.</p></div>
       </div>
 
-      <div class="legend" id="legend" hidden>
-        <span><i class="sym sym-ring"></i>brighter / new</span>
-        <span><i class="sym sym-x"></i>fainter / gone</span>
-        <span><i class="sym sym-arrow"></i>moved</span>
-        <span><i class="sym sym-half"></i>variable</span>
-        <span><i class="sym sym-dash"></i>dashed = uncertain <button type="button" class="info" data-term="confidence"></button></span>
-        <span class="scale" id="sigma-scale" hidden><b class="bar"></b><span>−5σ</span><span>0</span><span>+5σ</span></span>
+      <div class="cursor-line">
+        <span id="cursor-readout" class="mono">Point at the image for position and value</span>
+        <div class="legend" id="legend" hidden>
+          <span data-kind="brighter"><i class="sym sym-ring"></i>brighter / new</span>
+          <span data-kind="fainter"><i class="sym sym-x"></i>fainter / gone</span>
+          <span data-kind="moved"><i class="sym sym-arrow"></i>moved</span>
+          <span data-kind="candidate"><i class="sym sym-diamond"></i>candidate</span>
+          <span data-kind="variable"><i class="sym sym-half"></i>variable</span>
+          <span data-kind="low"><i class="sym sym-dash"></i>dashed = uncertain <button type="button" class="info" data-term="confidence"></button></span>
+          <span data-kind="nodata"><i class="sym sym-nodata"></i>no data <button type="button" class="info" data-term="nodata"></button></span>
+          <span class="scale" id="sigma-scale" hidden><b class="bar"></b><span>−5σ</span><span>0</span><span>+5σ</span></span>
+        </div>
       </div>
 
-      <div class="player">
-        <button type="button" id="prev" aria-label="Previous frame" title="Previous (←)">◀</button>
-        <button type="button" id="play" class="play" title="Play / pause (space)">Pause</button>
-        <button type="button" id="next" aria-label="Next frame" title="Next (→)">▶</button>
-        <label class="speed">Speed <input id="speed" type="range" min="1" max="10" value="3"></label>
-        <span id="frame-label" aria-live="polite">–</span>
-      </div>
-      <div class="timeline" id="timeline" aria-label="Passes on a time axis"></div>
       <div class="filmstrip" id="filmstrip" hidden></div>
 
-      <div class="toggles">
-        <label class="check"><input id="show-overlay" type="checkbox" checked> Gaia stars <button type="button" class="info" data-term="gaia"></button></label>
-        <label class="check"><input id="show-events" type="checkbox" checked> Change markers</label>
-        <label>Zoom
-          <select id="zoom"><option value="1">1×</option><option value="2">2×</option><option value="3">3×</option><option value="4">4×</option></select>
-        </label>
-        <span class="k export-label">Export</span><button type="button" id="save-png">Save image</button>
-        <button type="button" id="save-movie">Save movie</button>
-      </div>
-      <details class="display-opts" id="display-opts">
-        <summary>Display options</summary>
-        <div class="row">
-          <label><span>Contrast <button type="button" class="info" data-term="contrast"></button></span>
-            <select id="stretch">
-              <option value="asinh">Show faint things (asinh)</option>
-              <option value="linear">Linear</option>
-            </select>
-          </label>
-          <label>Colours
-            <select id="cmap">
-              <option value="gray">Grey</option>
-              <option value="inferno">Inferno</option>
-              <option value="viridis">Viridis</option>
-            </select>
-          </label>
-          <label><span>Brightness cap <button type="button" class="info" data-term="cap"></button></span> <input id="clip" type="range" min="90" max="100" step="0.1" value="99.5"></label>
+      <div class="timedock" id="timedock">
+        <div class="player">
+          <button type="button" id="prev" class="icon-btn" aria-label="Previous pass" title="Previous (←)">
+            <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" x2="5" y1="19" y2="5"/></svg>
+          </button>
+          <button type="button" id="play" class="play primary icon-btn" aria-label="Pause" title="Play / pause (Space)"></button>
+          <button type="button" id="next" class="icon-btn" aria-label="Next pass" title="Next (→)">
+            <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" x2="19" y1="5" y2="19"/></svg>
+          </button>
+          <label class="speed">Speed <input id="speed" type="range" min="0.5" max="3" step="0.5" value="2"> <output id="speed-label" class="mono">2 fps</output></label>
+          <span class="grow"></span>
+          <span id="frame-label" class="mono" aria-live="polite">–</span>
         </div>
-      </details>
+        <div class="timeline" id="timeline" role="group" aria-label="Passes on a time axis"></div>
+        <p class="timeline-caption" id="timeline-caption"></p>
+      </div>
+      <p class="embed-caption" id="embed-caption" hidden></p>
+
+      <!-- the picker: a sheet over the viewer, open when there is no target or when changing it -->
+      <section class="controls picker" id="picker" aria-label="Choose a target">
+        <div class="picker-head">
+          <h2>Choose a patch of sky</h2>
+          <button type="button" id="picker-close" class="icon-btn" aria-label="Close and return to the viewer" title="Back to the viewer (Esc)" hidden>
+            <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+        <div id="tour-offer" class="offer" role="region" aria-label="Tour offer" hidden>
+          <span>New here? A 1-minute tour shows how to spot a moving star.</span>
+          <button type="button" class="primary" id="tour-offer-yes">Take the tour</button>
+          <button type="button" id="tour-offer-no">No thanks</button>
+        </div>
+        <p class="k">Start with a test target: each opens real SPHEREx data at once.</p>
+        <div class="presets examples" id="presets" aria-label="Test targets"></div>
+
+        <div id="search-body">
+          <div class="tabs" role="tablist" aria-label="Search mode">
+            <button type="button" role="tab" id="tab-explore" data-mode="explore" aria-controls="panel-explore">Sky map</button>
+            <button type="button" role="tab" id="tab-name" data-mode="name" aria-controls="panel-name">Object name</button>
+            <button type="button" role="tab" id="tab-coords" data-mode="coords" aria-controls="panel-coords">Coordinates</button>
+          </div>
+
+          <!-- Mode 1: free exploration on an all-sky map -->
+          <div class="panel" id="panel-explore" role="tabpanel" aria-labelledby="tab-explore" hidden>
+            <div class="sky-wrap" id="sky-wrap">
+              <div id="sky"></div>
+              <div class="sky-msg" id="sky-msg" hidden></div>
+            </div>
+            <div class="sky-tools">
+              <label>Background <select id="sky-bg"></select></label>
+              <label class="slice">Wavelength <span class="slice-row"><input id="sky-slice" type="range" min="1" max="101" value="25"> <output id="sky-slice-label">–</output></span></label>
+              <button type="button" id="sky-draw" disabled aria-pressed="false">Draw box</button>
+              <button type="button" id="sky-view" disabled>Use current view</button>
+            </div>
+            <p class="hint">Drag to pan, scroll or pinch to zoom. <b>Click</b> to drop a box of the chosen field of view, or <b>Shift+drag</b> (or “Draw box”, then drag) to draw one, up to 0.5°. Orange circles select the test targets. Then press “Compare this region” to load its observations.</p>
+            <div class="selection" id="sky-selection">
+              <div><span class="k">Cursor</span> <span id="sky-cursor" class="mono">–</span></div>
+              <div><span class="k">Selection</span> <span id="sky-sel" class="mono">none yet</span></div>
+              <div><span class="k">Coverage</span> <span id="sky-cov">–</span></div>
+              <button type="button" id="sky-compare" class="primary" disabled>Compare this region</button>
+            </div>
+          </div>
+
+          <!-- Mode 2: object name -->
+          <form class="panel" id="panel-name" role="tabpanel" aria-labelledby="tab-name" hidden>
+            <div class="row">
+              <label class="grow">Object name
+                <input id="name" list="name-suggest" placeholder="Barnard's Star, RW Aur, M42, HD 189733…" autocomplete="off" required>
+              </label>
+              <datalist id="name-suggest"></datalist>
+              <button type="submit" class="primary">Search and compare</button>
+            </div>
+            <div class="result" id="name-result" hidden></div>
+          </form>
+
+          <!-- Mode 3: coordinates -->
+          <form class="panel" id="panel-coords" role="tabpanel" aria-labelledby="tab-coords" hidden novalidate>
+            <div class="row">
+              <label><span>RA <button type="button" class="info" data-term="radec"></button></span><input id="ra" placeholder="269.4461 or 17:57:47.1" autocomplete="off" inputmode="decimal"></label>
+              <label>Dec <input id="dec" placeholder="4.7707 or +04:46:14" autocomplete="off" inputmode="decimal"></label>
+              <button type="submit" class="primary">Compare</button>
+            </div>
+            <p class="hint">ICRS. Decimal degrees, or sexagesimal (RA in hours: <code>17:57:47</code> / <code>17h57m47s</code>). You can also paste both into the RA box: <code>269.446 4.771</code>.</p>
+            <p class="echo" id="coord-echo" aria-live="polite"></p>
+          </form>
+        </div>
+      </section>
     </section>
 
-    <aside class="side">
-      <div id="events-panel">
-      <div class="events-head">
-        <h2>Events <button type="button" class="info" data-term="changes"></button></h2>
-        <label class="check small"><input id="show-low" type="checkbox"> <span>show uncertain (<span id="low-count">0</span>)</span></label>
+    <!-- E · inspector -->
+    <aside class="inspector side" id="inspector" aria-label="Inspector">
+      <div class="itabs" role="tablist" aria-label="Inspector">
+        <button type="button" role="tab" id="itab-events" aria-controls="ipanel-events" aria-selected="true">Events</button>
+        <button type="button" role="tab" id="itab-spectrum" aria-controls="ipanel-spectrum" aria-selected="false" tabindex="-1">Spectrum</button>
+        <button type="button" role="tab" id="itab-details" aria-controls="ipanel-details" aria-selected="false" tabindex="-1">Details</button>
       </div>
-      <p class="hint" id="events-summary">Events appear once a target has two or more passes.</p>
-      <ol class="events" id="events"></ol>
-      <div class="event-detail" id="event-detail" hidden></div>
+      <div class="ipanel" id="ipanel-events" role="tabpanel" aria-labelledby="itab-events">
+        <div id="events-panel">
+          <div class="events-head">
+            <h2>Events <button type="button" class="info" data-term="changes"></button></h2>
+            <label class="check small"><input id="show-low" type="checkbox"> <span>show uncertain (<span id="low-count">0</span>)</span></label>
+          </div>
+          <p class="hint" id="events-summary">Events appear once a target has two or more passes.</p>
+          <ol class="events" id="events"></ol>
+          <div class="event-detail" id="event-detail" hidden></div>
+        </div>
       </div>
-
-      <h2>Spectrum <small>(click the image)</small></h2>
-      <canvas id="spectrum" width="360" height="200"></canvas>
+      <div class="ipanel" id="ipanel-spectrum" role="tabpanel" aria-labelledby="itab-spectrum" hidden>
+        <h2>Spectrum <small>click a star in the image</small></h2>
+        <canvas id="spectrum" width="360" height="220" role="img" aria-label="Spectrum: click a star in the image to measure it."></canvas>
+        <p class="hint" id="spectrum-note">One point per exposure, in µJy, at the wavelength SPHEREx saw at the star. Shapes mark passes; hollow points are flagged.</p>
+      </div>
+      <div class="ipanel" id="ipanel-details" role="tabpanel" aria-labelledby="itab-details" hidden>
+        <details class="advanced" id="advanced">
+          <summary>Observations, available measurements and exports</summary>
+          <div id="adv-body" class="adv-body"><p class="hint">Load a target first.</p></div>
+        </details>
+      </div>
     </aside>
-
-    <details class="advanced" id="advanced">
-      <summary>Advanced: observations, available measurements &amp; exports</summary>
-      <div id="adv-body" class="adv-body"><p class="hint">Load a target first.</p></div>
-    </details>
   </main>
+
+  <!-- G · status bar -->
+  <footer class="statusbar" id="statusbar">
+    <span id="backend-status" class="backend-status" role="status"></span>
+    <label class="check small" title="Require the backend: saved test-target observations are never substituted, and an outage is shown as an error (?fresh=1)"><input id="live-only" type="checkbox"> Backend only</label>
+    <span id="release-tag" class="mono"></span>
+    <span id="data-span"></span>
+    <span class="grow"></span>
+    <span class="sources">Data: SPHEREx (NASA/IPAC IRSA), Gaia DR3 (ESA), SIMBAD and Aladin Lite (CDS)</span>
+    <button type="button" id="about-btn" class="link">Credits and citation</button>
+  </footer>
 
   <dialog id="guide" class="guide" aria-labelledby="guide-title">
     <div class="guide-head">
       <h2 id="guide-title">What am I looking at?</h2>
-      <button type="button" class="round" id="guide-close" aria-label="Close">✕</button>
+      <button type="button" class="icon-btn" id="guide-close" aria-label="Close">
+        <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
     </div>
     <p class="hint">Volunteers learn faster from examples of real and fake changes than from rules. Each card loads a real example from the five test targets.</p>
     <div class="guide-cards" id="guide-cards"></div>
   </dialog>
 
-  <footer>
-    <p id="backend-status" class="backend-status" role="status"></p>
-    Data: SPHEREx (NASA/IPAC IRSA), Gaia DR3 (ESA); sky map: Aladin Lite (CDS). <span id="data-span"></span>
-    Built for NASA Space Apps 2026 by Sphere Shift.
-  </footer>
+  <dialog id="help" class="guide help" aria-labelledby="help-title">
+    <div class="guide-head">
+      <h2 id="help-title">Help and keyboard shortcuts</h2>
+      <button type="button" class="icon-btn" id="help-close" aria-label="Close">
+        <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </div>
+    <p>Pick a target, then watch the passes blink. Anything that steps from frame to frame moved; anything that changes brightness without moving may be variable. Click a star to measure its spectrum.</p>
+    <div class="help-actions">
+      <button type="button" class="primary" id="help-tour">Take the 1-minute tour</button>
+      <button type="button" id="help-guide">Open the field guide</button>
+    </div>
+    <h3>Keyboard</h3>
+    <dl class="keys">
+      <dt><kbd>Space</kbd></dt><dd>Play or pause</dd>
+      <dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Step one pass</dd>
+      <dt><kbd>1</kbd>–<kbd>7</kbd></dt><dd>Play passes, Smooth, Side by side, Difference, Changes (σ), Sum, Colours</dd>
+      <dt><kbd>A</kbd> <kbd>B</kbd></dt><dd>Use the pass on screen as pass A or pass B</dd>
+      <dt><kbd>D</kbd></dt><dd>Toggle the Difference view</dd>
+      <dt><kbd>G</kbd></dt><dd>Gaia stars on or off</dd>
+      <dt><kbd>M</kbd></dt><dd>Change markers on or off</dd>
+      <dt><kbd>+</kbd> <kbd>−</kbd></dt><dd>Zoom in or out (double-click the image too; drag to pan when zoomed)</dd>
+      <dt><kbd>/</kbd></dt><dd>Search</dd>
+      <dt><kbd>?</kbd></dt><dd>This help</dd>
+      <dt><kbd>Esc</kbd></dt><dd>Close a dialog, popover or the target picker</dd>
+    </dl>
+    <h3>Links you can share</h3>
+    <p class="hint">The address bar always holds the current view. Tick “Backend only” (or add <code>?fresh=1</code>) to prove the live path: saved demo data is never used, and an outage is shown as an error. <code>?embed=1</code> gives a bare player for other websites.</p>
+  </dialog>
+
+  <dialog id="about" class="guide about" aria-labelledby="about-title">
+    <div class="guide-head">
+      <h2 id="about-title">Credits and citation</h2>
+      <button type="button" class="icon-btn" id="about-close" aria-label="Close">
+        <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </div>
+    <p>Sphere Shift, built for NASA Space Apps 2026 (Planet X and SPHEREx).</p>
+    <ul>
+      <li>SPHEREx DR1 and QR3 spectral images, NASA/IPAC Infrared Science Archive: doi:10.26131/IRSA678, doi:10.26131/IRSA679, QR3 doi:10.26131/IRSA662</li>
+      <li>Gaia DR3 (ESA; Gaia Collaboration et al. 2023, A&amp;A 674, A1)</li>
+      <li>SIMBAD and Sesame name resolution, and Aladin Lite (CDS, Strasbourg)</li>
+      <li>Icons: Lucide (ISC licence). Interface type: IBM Plex Sans and Mono when installed (SIL OFL 1.1), otherwise the system fonts.</li>
+    </ul>
+    <p class="hint">Full credits, the citation text and the AI-use disclosure are in the project README and CITATION.md.</p>
+  </dialog>
 
   <script type="module" src="js/app.js"></script>
 </body>

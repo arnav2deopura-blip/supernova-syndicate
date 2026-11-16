@@ -23,6 +23,7 @@ jobs:
         with:
           node-version: '22'
       - run: node --test frontend/tests/*.test.mjs
+      - run: node scripts/check_changes.mjs --inject
   browser:
     runs-on: ubuntu-latest
     steps:

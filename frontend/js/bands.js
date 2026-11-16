@@ -50,44 +50,88 @@ export function rangeFor(lam) {
 /**
  * Per-pass images for a channel range, from /api/cube?per_pass=1: the mean of the chosen channels in each pass
  * (equal weight, like matched frames). Returns frames shaped like /api/frames (no noise maps).
+ * Every frame's metadata (dates, exposure counts, observation IDs, flags, no-data fraction) is rebuilt from the
+ * channels actually averaged, never inherited from the whole-band frame of that pass.
+ * `missing` lists the id of every requested channel that some pass lacks (e.g. "D6C09"); `gaps` gives the detail:
+ * [{k, channel, passes: [labels without it]}]. Requested channels absent from every pass are in both.
+ * A pass without every chosen channel is left out (`skipped`); the caller decides whether that is acceptable.
+ * `passFrames` (the whole-band frames) is used only for the pass dates when the cube reports no times at all.
  */
 export function framesFromCube(cube, lo, hi, passFrames = []) {
   const det = cube.det;
-  const chans = cube.channels.filter((c) => {
+  const inRange = cube.channels.filter((c) => {
     const k = +c.channel.slice(-2);
-    return c.channel.startsWith(det) && k >= lo && k <= hi && c.frames?.length;
+    return c.channel.startsWith(det) && k >= lo && k <= hi;
   });
-  const requested=Array.from({length:hi-lo+1},(_,i)=>chName(det,lo+i));
-  const missing=requested.filter(id=>!chans.some(c=>c.channel===id));
-  const labels = [...new Set(chans.flatMap((c) => c.frames.map((f) => f.epoch_label)))].sort((a, b) => +a.slice(1) - +b.slice(1));
+  const chans = inRange.filter((c) => c.frames?.length);
+  const labels = [...new Set(cube.channels.filter((c) => c.channel.startsWith(det)).flatMap((c) => (c.frames || []).map((f) => f.epoch_label)))]
+    .sort((a, b) => +a.slice(1) - +b.slice(1));
+  const gaps = [];
+  for (let k = lo; k <= hi; k++) {
+    const ch = cube.channels.find((c) => c.channel === chName(det, k));
+    const have = new Set((ch?.frames || []).map((f) => f.epoch_label));
+    const lacking = labels.filter((l) => !have.has(l));
+    if (lacking.length || !ch?.frames?.length) gaps.push({ k, channel: chName(det, k), passes: lacking.length ? lacking : labels });
+  }
   const n = cube.wcs.width * cube.wcs.height;
   const frames = [];
-  for (const label of labels) {
+  const usedLabels = [...new Set(chans.flatMap((c) => c.frames.map((f) => f.epoch_label)))].sort((a, b) => +a.slice(1) - +b.slice(1));
+  for (const label of usedLabels) {
     const parts = chans.map((c) => c.frames.find((f) => f.epoch_label === label)).filter(Boolean);
     // a pass is only fair to compare when it has every chosen channel
-    if (missing.length || parts.length !== requested.length) continue;
+    if (parts.length < hi - lo + 1 || parts.length < chans.length) continue;
     const data = new Array(n);
+    let empty = 0;
     for (let i = 0; i < n; i++) {
       let s = 0, m = 0;
       for (const p of parts) { if (p.data[i] !== null) { s += p.data[i]; m++; } }
       data[i] = m === parts.length ? s / m : null;
+      if (data[i] === null) empty++;
     }
-    const meta = passFrames.find((f) => f.epoch_label === label) || {};
-    const mjds = parts.map((p) => p.mjd_mean).filter(Number.isFinite);
-    const mjd = mjds.length ? mjds.reduce((a, b) => a + b, 0) / mjds.length : meta.mjd_mean;
+    const nexp = parts.reduce((a, p) => a + (Number.isFinite(p.n_exposures) ? p.n_exposures : 0), 0);
+    const mjds = parts.filter((p) => Number.isFinite(p.mjd_mean));
+    // the per-pass cube may report each cell's first and last exposure; otherwise its mean time bounds it
+    const starts = parts.map((p) => (Number.isFinite(p.mjd_start) ? p.mjd_start : p.mjd_mean)).filter(Number.isFinite);
+    const ends = parts.map((p) => (Number.isFinite(p.mjd_end) ? p.mjd_end : p.mjd_mean)).filter(Number.isFinite);
+    // exposure-weighted mean time of the channels used; their first and last mean times bound the frame
+    const wsum = mjds.reduce((a, p) => a + (p.n_exposures || 1), 0);
+    const mjd = mjds.length ? mjds.reduce((a, p) => a + p.mjd_mean * (p.n_exposures || 1), 0) / wsum : null;
+    const lams = parts.map((p) => p.lam_target_um).filter((v) => Number.isFinite(v) && v > 0);
+    const obs = parts.flatMap((p) => (Array.isArray(p.obs_ids) ? p.obs_ids : []));
+    const pass = passFrames.find((f) => f.epoch_label === label) || {};
     frames.push({
       epoch_label: label, data, noise: null, width: cube.wcs.width, height: cube.wcs.height,
-      mjd_start: parts.every(p=>Number.isFinite(p.mjd_start)) ? Math.min(...parts.map(p=>p.mjd_start)) : mjd,
-      mjd_end: parts.every(p=>Number.isFinite(p.mjd_end)) ? Math.max(...parts.map(p=>p.mjd_end)) : mjd, mjd_mean: mjd,
-      n_exposures: parts.reduce((a, p) => a + (p.n_exposures || 0), 0),
-      flag_fraction: data.filter(v=>v===null).length/n,
-      obs_ids: [...new Set(parts.flatMap(p=>p.obs_ids || []))],
-      lam_eff_um: parts.reduce((a, p) => a + (p.lam_target_um || 0), 0) / parts.length || null,
-      target_flags: parts.every(p=>Array.isArray(p.target_flags)) ? [...new Set(parts.flatMap(p=>p.target_flags))] : null,
+      mjd_start: starts.length ? Math.min(...starts) : pass.mjd_start ?? null,
+      mjd_end: ends.length ? Math.max(...ends) : pass.mjd_end ?? null,
+      mjd_mean: mjd ?? pass.mjd_mean ?? null,
+      n_exposures: nexp,
+      obs_ids: obs.length ? [...new Set(obs)] : null,
+      flag_fraction: n ? empty / n : null,
+      lam_eff_um: lams.length ? lams.reduce((a, b) => a + b, 0) / lams.length : null,
+      // null = not reported for every channel used (unknown, not "none")
+      target_flags: parts.every((p) => Array.isArray(p.target_flags)) ? [...new Set(parts.flatMap((p) => p.target_flags))] : null,
+      channels: parts.map((p, i) => ({ channel: chans[i].channel, n_exposures: p.n_exposures ?? null, lam_target_um: p.lam_target_um ?? null })),
+      from_channels: true,
     });
   }
-  const skipped = labels.length - frames.length;
-  return { frames, channels: requested, missing, skipped };
+  const skipped = usedLabels.length - frames.length;
+  return { frames, channels: chans.map((c) => c.channel), skipped, missing: gaps.map((g) => g.channel), gaps, passes: labels };
+}
+
+/** Contiguous runs of channels inside lo..hi that every pass covers (the explicit alternatives to a gap). */
+export function coveredRuns(cube, lo, hi) {
+  const runs = [];
+  let start = null;
+  for (let k = lo; k <= hi + 1; k++) {
+    const ok = k <= hi && passesWith(cube, k, k).length === allPasses(cube).length && allPasses(cube).length > 0;
+    if (ok && start === null) start = k;
+    if (!ok && start !== null) { runs.push({ lo: start, hi: k - 1 }); start = null; }
+  }
+  return runs;
+}
+/** Every pass label present in this per-pass cube's detector. */
+export function allPasses(cube) {
+  return [...new Set(cube.channels.filter((c) => c.channel.startsWith(cube.det)).flatMap((c) => (c.frames || []).map((f) => f.epoch_label)))];
 }
 
 /** Passes that have every channel lo..hi of this per-pass cube. */

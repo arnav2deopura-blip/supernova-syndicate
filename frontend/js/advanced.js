@@ -1,6 +1,6 @@
 // Advanced drawer for professionals: per-pass and per-exposure metadata, astrometry, photometry, derived physics
 // and exports. Rule: never fabricate — a missing value shows "Unknown" with the reason on hover. Owner: C.
-import { el, download, toCSV, mjdDate } from "./events-ui.js";
+import { el, download, toCSV, mjdDate, withHeader } from "./events-ui.js";
 import { renderFieldMetrics } from "./field-metrics.js";
 import { galactic, ecliptic, distance, tangentialVelocity, passMagnitudes, reducedPM, blackbodyT, falseAlarms } from "./astro.js";
 
@@ -13,7 +13,7 @@ function table(headers, rows) {
   const visible=headers.map((_,i)=>i).filter(i=>rows.some(row=>row[i]!=null && !(row[i] instanceof Element && row[i].classList.contains('unknown'))));
   rows=rows.map(row=>visible.map(i=>row[i])); headers=visible.map(i=>headers[i]);
   const t = el("table");
-  t.append(el("thead", {}, el("tr", {}, ...headers.map((h) => el("th", { class: h.num ? "num" : "", text: h.label ?? h })))));
+  t.append(el("thead", {}, el("tr", {}, ...headers.map((h) => el("th", { class: h.num ? "num" : "", text: h.label ?? h, ...(h.title ? { title: h.title } : {}) })))));
   const tb = el("tbody");
   for (const r of rows) tb.append(el("tr", {}, ...r.map((c, i) => el("td", { class: headers[i]?.num ? "num" : "" }, c ?? unk("Not in the response")))));
   t.append(tb);
@@ -31,7 +31,7 @@ const loadingOr = (state, why, build) => (state === "loading" ? el("p", { class:
 export { deriveAdvanced } from "./field-metrics.js";
 
 export function renderAdvanced(body, ctx) {
-  const { target, resp, band, matched, exposures, motion, lightcurve, movers, events, spectrum, threshold, fitsURL, sexa, pick } = ctx;
+  const { target, resp, band, matched, exposures, motion, lightcurve, movers, events, spectrum, threshold, fitsURL, sexa, pick, repro = [] } = ctx;
   if (!target || !resp) { body.replaceChildren(el("p", { class: "hint", text: "Load a target first." })); return; }
   const frames = resp.frames;
   const displayed=ctx.displayedCube || resp;
@@ -45,7 +45,7 @@ export function renderAdvanced(body, ctx) {
   out.push(section("Passes",
     el("p", { class: "hint", text: `${band}${matched ? `, matched channels ${resp.matched_channels?.join(", ") || "?"} (λ_eff ${f(resp.lam_eff_um, 3) ?? "?"} µm)` : ""} · release ${resp.release || "unknown"} · ${resp.units || "units not supplied"}` }),
     table(["Pass", "Dates", { label: "MJD mean", num: true }, { label: "Exp. used", num: true }, { label: "dropped", num: true }, { label: "λ_eff µm", num: true },
-      { label: "noise ×", num: true }, { label: "reg. offset ″", num: true }, { label: "reg. rms ″", num: true }, { label: "masked %", num: true }, "Target flags"],
+      { label: "noise ×", num: true }, { label: "reg. offset ″", num: true }, { label: "reg. rms ″", num: true }, { label: "No-data pixels %", num: true, title: "flag_fraction: the share of output pixels with no data (masked or uncovered). Not an exposure contamination rate." }, "Target flags"],
     frames.map((fr) => [
       fr.epoch_label, `${mjdDate(fr.mjd_start)} – ${mjdDate(fr.mjd_end)}`,
       val(f(fr.mjd_mean, 2), "No mean MJD in this response"),
@@ -75,7 +75,7 @@ export function renderAdvanced(body, ctx) {
       const mine = (ex.exposures || []).filter((e) => e.detector === det);
       return el("div", {},
         el("p", { class: "hint", text: `${mine.length} ${band} exposures (${(ex.exposures || []).length} in all bands). Times are MJD; wavelength and quality are shown only when measured by the pipeline.` }),
-        table(["obs_id", { label: "MJD", num: true }, "Pass", { label: "λ at target µm", num: true }, { label: "stamp masked %", num: true }, "Target flags", "L2 file"],
+        table(["obs_id", { label: "MJD", num: true }, "Pass", { label: "λ at target µm", num: true }, { label: "Stamp no-data %", num: true, title: "The share of this exposure's cutout pixels with no data (masked)." }, "Target flags", "L2 file"],
           mine.slice(0, 200).map((e) => [e.obs_id, f(e.mjd, 3), e.epoch_label || "–",
             val(f(e.wavelength_um, 3), "Filled in once this detector's frames are built"),
             val(f(e.flags_summary?.flag_fraction != null ? e.flags_summary.flag_fraction * 100 : null, 2), "Not reported"),
@@ -104,9 +104,9 @@ export function renderAdvanced(body, ctx) {
   out.push(section("Photometry",
     dl([
       ["Spectrum", spectrum?.points ? `${spectrum.points.length} points at ${f(spectrum.ra, 5)}, ${f(spectrum.dec, 5)} (${spectrum.points.filter((p) => p.flagged).length} flagged)` : unk("Click a star in the image to measure its spectrum")],
-      ["AB mag (median)", pm.unknown ? unk(pm.unknown) : f(pm.value, 2), "m_AB = 23.9 − 2.5·log₁₀(f_ν / µJy)"],
+      [`AB mag${pm.channel ? ` in ${pm.channel}` : ""} (median)`, pm.unknown ? unk(pm.unknown) : f(pm.value, 2), "m_AB = 23.9 − 2.5·log₁₀(f_ν / µJy)"],
       ["Per pass", pm.unknown ? unk(pm.unknown) : pm.per.map((p) => `${p.epoch_label} ${f(p.mag, 2)}`).join(" · ")],
-      ["Δm (last − first)", pm.unknown ? unk(pm.unknown) : val(f(pm.dm, 3), "Needs unsaturated points in two passes"), "Only one shared channel is used for this diagnostic magnitude."],
+      [`Δm${pm.channel ? ` in ${pm.channel}` : ""} (last − first)`, pm.unknown ? unk(pm.unknown) : val(f(pm.dm, 3), "Needs unsaturated points in two passes"), "Only one shared channel is used for this diagnostic magnitude."],
     ]),
     loadingOr(lightcurve, "Open the drawer to load the light curve.", (lc) => dl([
       ["Light curve", `${lc.n_used}/${lc.n_points} points, ${lc.method}`],
@@ -153,24 +153,24 @@ export function renderAdvanced(body, ctx) {
 
   // ---- exports ----
   const exp = el("div", { class: "exports" });
-  const manifest = {tool:"Sphere Shift",exported_utc:new Date().toISOString(),query:target,band,displayed_source:displayed._provenance,comparison_series_source:resp._provenance,
+  const manifest = {tool:"Sphere Shift",exported_utc:new Date().toISOString(),reproducibility:Object.fromEntries(repro),query:target,band,displayed_source:displayed._provenance,comparison_series_source:resp._provenance,
     release:displayed.release,processing:displayed.provenance || {status:"Not recorded in this historical saved product"},retrieval:resp.retrieval,
     comparison_scope:resp.comparison_scope || "field_centre_quicklook",wavelengths:resp.matched_channels,range:resp.range,
     completeness:resp.completeness,units:resp.units,frames:frames.map(({data,noise,coverage,...meta})=>meta),
     displayed_cube:ctx.displayedCube ? {...ctx.displayedCube,channels:ctx.displayedCube.channels.map(({data,frames,...channel})=>channel)} : undefined,
     analyses:{spectrum,motion,lightcurve,movers},limitations:["Exploratory estimates; candidates are not confirmed discoveries.","Pixel errors omit a full resampling covariance matrix.","Saturated wing fits and blended sources require independent checks."]};
   exp.append(el("button",{type:"button",text:"Research manifest JSON",onclick:()=>download("spherex-manifest.json",JSON.stringify(manifest,null,2),"application/json")}));
-  exp.append(el('button',{type:'button',text:'Observation metadata CSV',onclick:()=>download('observations.csv',toCSV([['epoch','mjd_start','mjd_end','exposures','units','effective_wavelength_um','flags','observation_ids'],...frames.map(fr=>[fr.epoch_label,fr.mjd_start,fr.mjd_end,fr.n_exposures,resp.units||'',fr.lam_eff_um,fr.target_flags?.join(';'),fr.obs_ids?.join(';')])]),'text/csv')}));
+  exp.append(el('button',{type:'button',text:'Observation metadata CSV',onclick:()=>download('observations.csv',withHeader(repro,toCSV([['epoch','mjd_start','mjd_end','exposures','units','effective_wavelength_um','flags','observation_ids'],...frames.map(fr=>[fr.epoch_label,fr.mjd_start,fr.mjd_end,fr.n_exposures,resp.units||'',fr.lam_eff_um,fr.target_flags?.join(';'),fr.obs_ids?.join(';')])])),'text/csv')}));
   if (fitsURL) exp.append(el("a", { class: "btn", href: fitsURL, target: "_blank", rel: "noopener", text: "Frames as FITS" }));
   else exp.append(el("span", {}, "Frames as FITS: ", unk("Needs the live backend (the offline bake has no FITS export)")));
   if (spectrum?.points) {
-    exp.append(el("button", { type: "button", text: "Spectrum CSV", onclick: () => download("spectrum.csv", toCSV([["wavelength_um", "flux_uJy", "flux_err", "epoch", "flagged", "obs_id"], ...spectrum.points.map((p) => [p.wavelength_um, p.flux, p.flux_err, p.epoch_label, p.flagged, p.obs_id])]), "text/csv") }));
+    exp.append(el("button", { type: "button", text: "Spectrum CSV", onclick: () => download("spectrum.csv", withHeader(repro, toCSV([["wavelength_um", "flux_uJy", "flux_err", "epoch", "flagged", "obs_id"], ...spectrum.points.map((p) => [p.wavelength_um, p.flux, p.flux_err, p.epoch_label, p.flagged, p.obs_id])])), "text/csv") }));
   }
   if (lightcurve && lightcurve.points) {
-    exp.append(el("button", { type: "button", text: "Light curve CSV", onclick: () => download("lightcurve.csv", toCSV([["mjd", "lam_um", "flux_uJy", "flux_err", "scale", "scale_err", "flagged", "used"], ...lightcurve.points.map((p) => [p.mjd, p.lam_um, p.flux, p.flux_err, p.scale, p.scale_err, p.flagged, p.used])]), "text/csv") }));
+    exp.append(el("button", { type: "button", text: "Light curve CSV", onclick: () => download("lightcurve.csv", withHeader(repro, toCSV([["mjd", "lam_um", "flux_uJy", "flux_err", "scale", "scale_err", "flagged", "used"], ...lightcurve.points.map((p) => [p.mjd, p.lam_um, p.flux, p.flux_err, p.scale, p.scale_err, p.flagged, p.used])])), "text/csv") }));
   }
   if (movers?.tracks) exp.append(el("button", { type: "button", text: "Tracks JSON", onclick: () => download("tracks.json", JSON.stringify({manifest,tracks:movers.tracks}, null, 2), "application/json") }));
-  if (events?.length) exp.append(el("button", { type: "button", text: "Events CSV", onclick: () => download("events.csv", toCSV([["id", "kind", "ra", "dec", "sigma", "confidence", "flags"], ...events.map((e) => [e.id, e.kind, e.ra, e.dec, e.sigma, e.confidence, e.flags.join(" ")])]), "text/csv") }));
+  if (events?.length) exp.append(el("button", { type: "button", text: "Events CSV", onclick: () => download("events.csv", withHeader(repro, toCSV([["id", "kind", "ra", "dec", "sigma", "confidence", "flags"], ...events.map((e) => [e.id, e.kind, e.ra, e.dec, e.sigma, e.confidence, e.flags.join(" ")])])), "text/csv") }));
   const cite = `This research used SPHEREx data (NASA/IPAC IRSA; doi:10.26131/IRSA678, doi:10.26131/IRSA679, QR3 doi:10.26131/IRSA662), Gaia DR3 (ESA; Gaia Collaboration et al. 2023, A&A 674, A1), SIMBAD (CDS) and Sphere Shift (NASA Space Apps 2026). Release: ${resp.release || "unknown"}.`;
   const copy = el("button", { type: "button", text: "Copy citation", onclick: async () => {
     try { await navigator.clipboard.writeText(cite); copy.textContent = "Copied ✓"; } catch { copy.textContent = "Select the text below"; }

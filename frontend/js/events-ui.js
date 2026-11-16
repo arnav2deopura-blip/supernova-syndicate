@@ -98,9 +98,11 @@ function download(name, text, type) {
 export { download };
 
 export function eventReport(e, ctx) {
-  const { target, frames, A, B, matched, band, passes, release } = ctx;
+  const { target, frames, A, B, matched, band, passes, release, repro = [] } = ctx;
   return {
     tool: "Sphere Shift", generated: new Date().toISOString(), release: release || null,
+    reproducibility: Object.fromEntries(repro),
+    status: e.kind === "candidate" || e.kind === "gaia_pm_mismatch" ? "candidate, not independently verified" : e.confidence === "low" ? "uncertain" : "measured",
     target: target && { label: target.label, ra: target.ra, dec: target.dec },
     band, matched, compared: { a: A.epoch_label, b: B.epoch_label },
     event: {
@@ -113,6 +115,9 @@ export function eventReport(e, ctx) {
     method: "σ = (B − A) / sqrt(σA² + σB² + (0.1·max(|A|,|B|))²) on the co-added pass frames; regions ≥ 5σ.",
   };
 }
+
+/** Prepend reproducibility lines ("# key: value") to a CSV export. repro = [[key, value], …]. */
+export const withHeader = (repro, csv) => [...(repro || []).map(([k, v]) => `# ${k}: ${v ?? "unknown"}`), csv].join("\n");
 
 const csvCell = (v) => (v == null ? "" : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
 export const toCSV = (rows) => rows.map((r) => r.map(csvCell).join(",")).join("\n");
@@ -129,6 +134,7 @@ export function renderEventDetail(box, e, ctx) {
   if (e.track) lines.push(`Movers search: ${fmt(e.track.pm / 1000, 2)} ± ${fmt(e.track.pm_err / 1000, 2)}″/yr (${fmt(e.track.pm_sigma)}σ), ${e.track.gaia ? `matches ${e.track.gaia.id || "Gaia"}` : "no Gaia match"}.`);
   if (e.lightcurve) lines.push(`Light curve: χ²/dof = ${fmt(e.chi2_dof)} against constant brightness (> 5 means it varies), with quiet comparison stars. See Advanced → Photometry.`);
   if (e.absorbed?.length) lines.push(`Explains ${e.absorbed.length} change region${e.absorbed.length > 1 ? "s" : ""} between ${A.epoch_label} and ${B.epoch_label}.`);
+  if (e.kind === "candidate" || e.kind === "gaia_pm_mismatch") lines.push("Candidate, not independently verified: its significance comes from this tool alone.");
   if (!e.track && !e.known && !e.lightcurve) lines.push(`Change ${fmt(e.sigma)}σ between ${A.epoch_label} and ${B.epoch_label}${e.shift_arcsec ? `, shifted ${fmt(e.shift_arcsec)}″` : ""}.`);
 
   // per-pass strip: small cutouts with S/N and state
@@ -162,8 +168,8 @@ export function renderEventDetail(box, e, ctx) {
     el("button", { type: "button", text: "Report (JSON)", title: "Download everything needed to send this candidate to a professional", onclick: () => download(`spherex-${e.id}.json`, JSON.stringify(report(), null, 2), "application/json") }),
     el("button", { type: "button", text: "CSV", onclick: () => {
       const r = report();
-      download(`spherex-${e.id}.csv`, toCSV([["id", "kind", "ra", "dec", "sigma", "confidence", "pass", "mjd", "snr", "state"],
-        ...r.event.passes.map((p) => [e.id, e.kind, e.ra, e.dec, e.sigma, e.confidence, p.epoch_label, p.mjd, p.snr, p.state])]), "text/csv");
+      download(`spherex-${e.id}.csv`, withHeader(ctx.repro, toCSV([["id", "kind", "ra", "dec", "sigma", "confidence", "pass", "mjd", "snr", "state"],
+        ...r.event.passes.map((p) => [e.id, e.kind, e.ra, e.dec, e.sigma, e.confidence, p.epoch_label, p.mjd, p.snr, p.state])])), "text/csv");
     } }),
     fitsURL ? el("a", { class: "btn", href: fitsURL, target: "_blank", rel: "noopener", text: "FITS cutout" }) : null);
 

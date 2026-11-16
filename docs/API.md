@@ -412,7 +412,8 @@ jobs per client connection). Busy responses use HTTP 429 and Retry-After. Identi
 active product keys share a job. Queued work expires after five minutes. Job snapshots
 are written in the configured cache; after restart, interrupted jobs explain how to
 repeat the query and reuse downloads. Persistent storage is a deployment choice.
-Client polling has a twenty-minute overall limit and a five-minute no-progress limit.
+Client polling has a twenty-minute overall limit and a five-minute no-progress limit (the
+page asks the user after two minutes without progress).
 `?fresh=1` is a frontend policy that disables saved-file fallback; it does not purge
 backend caches. A true cold retrieval test uses a new SPHEREX_CACHE_DIR.
 

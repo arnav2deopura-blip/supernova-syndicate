@@ -15,7 +15,8 @@ with sync_playwright() as p:
  page.route('**/api/**',lambda r:r.fulfill(status=503,json={'error':'upstream_unavailable','message':'Test outage'},headers={'Access-Control-Allow-Origin':'*'}))
  page.goto(BASE+'/?name=Barnard%27s+Star&api=default')
  page.wait_for_function("document.querySelector('#badges').textContent.includes('Saved')")
- page.locator('#tour-offer-no').click()
+ # the tour offer lives in the target picker, which a link that names a target skips
+ if page.locator('#tour-offer-no').is_visible(): page.locator('#tour-offer-no').click()
  for view in ['pair','smooth','diff','changes','sum','colours','blink']:
   page.locator('[data-view='+view+']').click()
   page.wait_for_timeout(200)
@@ -33,7 +34,7 @@ with sync_playwright() as p:
  with page.expect_download() as exported:page.get_by_role('button',name='Research manifest JSON',exact=True).click()
  manifest=json.loads(Path(exported.value.path()).read_text())
  assert manifest['release'] and manifest['frames'][0]['obs_ids'] and manifest['limitations']
- assert 'masked %' in page.locator('#adv-body').inner_text()
+ assert 'No-data pixels %' in page.locator('#adv-body').inner_text()
  page.locator('#guide-btn').click();page.locator('#guide-close').click()
  page.locator('#tour-btn').click();page.locator('.tour-skip').click()
  page.set_viewport_size({'width':390,'height':844})
@@ -48,7 +49,7 @@ with sync_playwright() as p:
  # Malformed HTTP-200 must reach a friendly error, before .frames.map.
  page.route('**/api/frames?**',lambda r:r.fulfill(json={},headers={'Access-Control-Allow-Origin':'*'}))
  page.goto(BASE+'/?api=default&fresh=1&mode=coords&ra=10&dec=20')
- page.get_by_text('The data service returned an invalid result.',exact=True).wait_for()
+ page.get_by_text('The service returned data this page cannot read.',exact=True).wait_for()
  assert not errors,errors
  print('PASS deterministic views, synchronized zoom, exports, tour, mobile, strict fresh, share URL, malformed responses')
  page.screenshot(path=os.environ.get('SPHEREX_SCREENSHOT','/tmp/spherex-regression.png'),full_page=True)

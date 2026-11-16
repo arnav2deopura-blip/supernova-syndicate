@@ -23,7 +23,7 @@ with sync_playwright() as p:
   started=time.monotonic()
   while time.monotonic()-started<1200:
    page.wait_for_timeout(2000)
-   if page.locator('#badges').inner_text().find('Archive build')>=0 or page.locator('#badges').inner_text().find('Server cache')>=0:break
+   if page.locator('#badges').inner_text().find('Processed now')>=0 or page.locator('#badges').inner_text().find('Server cache')>=0:break
    if not page.locator('#viewer-notice').is_hidden() and page.locator('#viewer-notice').get_attribute('class').find('notice-error')>=0:
     raise AssertionError(page.locator('#viewer-notice').inner_text())
   else:raise AssertionError('Live frames did not finish')

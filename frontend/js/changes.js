@@ -4,12 +4,13 @@
 //   sigma = (B − A) / sqrt(σA² + σB²)       per pixel, using the calibrated noise maps (docs/API.md "Frame extras")
 //   events = connected regions with |sigma| ≥ threshold, classified as
 //     moved        a fading + brightening pair (a "dipole") closer than the largest plausible motion
-//     appeared     brighter in B, and below 2σ in A           (green ○)
-//     brightened   brighter in B, already detected in A       (green ○)
-//     disappeared  fainter in B, and below 2σ in B            (red ✕)
-//     faded        fainter in B, still detected in B          (red ✕)
+//     appeared     brighter in B, and below 2σ in A           (orange ○)
+//     brightened   brighter in B, already detected in A       (orange ○)
+//     disappeared  fainter in B, and below 2σ in B            (blue ✕)
+//     faded        fainter in B, still detected in B          (blue ✕)
 //   confidence "low" when the region sits on a bright/saturated star (its residuals exceed the noise map),
-//   touches a data gap, or the passes do not share a bandpass (matched wavelengths off).
+//   touches a data gap, or the passes do not share a bandpass (matched wavelengths off), or (brightness changes
+//   only) it lies further than `matchRadiusPx` from the field centre, where matching was done.
 
 export const PSF_ARCSEC = 7;
 export const MAX_PM_ARCSEC_YR = 12;   // same default as /api/movers
@@ -107,10 +108,11 @@ function touchesGap(pix, frames, w, h) {
 /**
  * Find changes between passes A and B.
  * opts: { width, height, pixel_scale_arcsec, threshold=5, matched=false, brightSNR=150, sysFrac=SYS_FRAC,
- *         brightStars: [{x, y}] pixel positions of bright catalogue stars (optional), dtYears }
+ *         brightStars: [{x, y}] pixel positions of bright catalogue stars (optional), dtYears,
+ *         matchRadiusPx: brightness changes further than this from the centre get the off_centre flag }
  */
 export function findChanges(A, B, opts) {
-  const { width: w, height: h, pixel_scale_arcsec: ps, threshold = 5, matched = false, brightSNR = 150, brightStars = [], sysFrac = SYS_FRAC } = opts;
+  const { width: w, height: h, pixel_scale_arcsec: ps, threshold = 5, matched = false, brightSNR = 150, brightStars = [], sysFrac = SYS_FRAC, matchRadiusPx = Infinity } = opts;
   const dtYears = opts.dtYears ?? Math.abs((B.mjd_mean ?? B.mjd_start) - (A.mjd_mean ?? A.mjd_start)) / 365.25;
   const sig = sigmaMap(A, B, sysFrac);
   // the sky background level differs a little between passes (zodiacal light), and the combined noise of two
@@ -172,6 +174,8 @@ export function findChanges(A, B, opts) {
   for (const e of events) {
     // a brightness change in plain (unmatched) frames can come from the bandpass moving between passes
     if (!matched && e.kind !== "moved" && !e.flags.includes("bandpass")) e.flags.push("bandpass");
+    // wavelengths are matched at the field centre only: off-centre brightness changes need the spectrum
+    if (matched && e.kind !== "moved" && Math.hypot(e.x - w / 2, e.y - h / 2) > matchRadiusPx) e.flags.push("off_centre");
     e.confidence = e.flags.length ? "low" : "high";
   }
   // high confidence first, then by significance
@@ -187,17 +191,18 @@ export const KIND_INFO = {
   brightened: { label: "Brighter", shape: "○", text: "The source is brighter in pass B than in pass A." },
   disappeared: { label: "Gone", shape: "✕", text: "Something detected in pass A is missing in pass B. Often an asteroid that has moved on, or an artefact." },
   faded: { label: "Fainter", shape: "✕", text: "The source is fainter in pass B than in pass A." },
-  candidate: { label: "Mover candidate", shape: "→", text: "Moves across every pass and no Gaia star follows it: the interesting kind (from the backend's movers search). Check it before reporting." },
+  candidate: { label: "Mover candidate", shape: "◇", text: "Moves across every pass and no Gaia star follows it: the interesting kind (from the backend's movers search). Check it before reporting." },
   known_mover: { label: "Known mover", shape: "→", text: "Moves across the passes and matches a Gaia star with that proper motion: real, but already known." },
   variable: { label: "Variable star", shape: "◐", text: "The target's light curve (all exposures, corrected for the moving bandpass) changes more than its quiet comparison stars do: a real variable." },
-  gaia_pm_mismatch: { label: "Moves oddly", shape: "→", text: "Matches a Gaia star, but moves differently from what Gaia says (by more than 5σ). Worth a closer look." },
+  gaia_pm_mismatch: { label: "Moves oddly", shape: "◇", text: "Matches a Gaia star, but moves differently from what Gaia says (by more than 5σ). Worth a closer look." },
 };
 
 export const FLAG_INFO = {
   bright_star: "On or next to a very bright or saturated star: its leftovers are bigger than the noise map, so this may be fake.",
   data_gap: "Touches a gap in the data or the edge of the cutout: “no data” is not the same as “not there”.",
   two_passes: "Seen in only two passes: a real mover should show up in every pass, so this needs a third pass to confirm.",
-  bandpass: "Fair brightness comparison is off, so each pass sees slightly different wavelengths. A red star can look brighter just because of that.",
+  bandpass: "Wavelengths are not matched, so each pass sees slightly different wavelengths. A red star can look brighter just because of that.",
+  off_centre: "Far from the field centre, where wavelengths are matched: the passes can differ by up to about half a channel here. Check its spectrum before trusting a brightness change.",
 };
 
 /**
