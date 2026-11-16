@@ -3,7 +3,7 @@
 Copy-paste text for the Space Apps project page. Written 15 Nov 2026.
 
 - Project link: https://arnav2deopura-blip.github.io/supernova-syndicate/
-- Demo link: https://arnav2deopura-blip.github.io/supernova-syndicate/demo/Sphere_Shift_Demo.pdf
+- Demo link: https://arnav2deopura-blip.github.io/supernova-syndicate/demo/Sphere_Shift.pdf
 - Code: https://github.com/arnav2deopura-blip/supernova-syndicate
 
 ## High-level summary (185 words; limit 50–200)
