@@ -304,7 +304,8 @@ button.info:hover, button.info[aria-expanded="true"] { color: var(--ink-1); back
 .notice-warn .notice-icon { color: var(--warn); }
 
 /* D · stage */
-.stage-area { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 8px 16px; }
+/* overflow: the stage is resized on the next frame after a viewport change; never let it widen the page meanwhile */
+.stage-area { flex: 1 1 auto; min-height: 0; min-width: 0; display: flex; align-items: center; justify-content: center; padding: 8px 16px; overflow: hidden; }
 .stage-row { display: flex; align-items: stretch; gap: 12px; }
 .stage {
   position: relative; width: 480px; height: 480px; flex: none;

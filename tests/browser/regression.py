@@ -15,7 +15,8 @@ with sync_playwright() as p:
  page.route('**/api/**',lambda r:r.fulfill(status=503,json={'error':'upstream_unavailable','message':'Test outage'},headers={'Access-Control-Allow-Origin':'*'}))
  page.goto(BASE+'/?name=Barnard%27s+Star&api=default')
  page.wait_for_function("document.querySelector('#badges').textContent.includes('Saved')")
- page.locator('#tour-offer-no').click()
+ # the tour offer lives in the target picker, which a link that names a target skips
+ if page.locator('#tour-offer-no').is_visible(): page.locator('#tour-offer-no').click()
  for view in ['pair','smooth','diff','changes','sum','colours','blink']:
   page.locator('[data-view='+view+']').click()
   page.wait_for_timeout(200)
